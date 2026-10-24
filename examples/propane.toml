@@ -1,0 +1,12 @@
+# Uses the bundled demonstration rules. Custom rule paths are relative to this file.
+# rules = "my_rules.json"
+
+[[seeds]]
+smiles = "CCC"
+name = "propane"
+
+[generation]
+max_carbon = 6
+max_species = 200
+max_reactions = 1000
+
