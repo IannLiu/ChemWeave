@@ -46,7 +46,7 @@ restored = Network.from_json("results/network.json")
 
 `load_rules()` loads the bundled examples; `load_rules("my_rules.json")` loads your own rule file. Create `Species` objects with `from_smiles` or `from_mol` to standardize their structures, molecular formulas, and identities.
 
-The C6 example generated 22 species and 45 reactions in the tested `base` environment (Python 3.12, RDKit 2026.03.6). These counts illustrate a run; they do not establish chemical validity.
+The C6 example generated 22 species, 45 reactions, and 45 symmetry-grouped channels in the tested `base` environment (Python 3.12, RDKit 2026.03.6). These counts illustrate a run; they do not establish chemical validity.
 
 ## Custom rules
 
@@ -56,7 +56,7 @@ Rules are stored as a JSON list. This example represents the overall transformat
 [
   {
     "id": "propane_dehydrogenation",
-    "smarts": "[CH3:1][CH2:2][CH3:3]>>[CH2:1]=[CH:2][CH3:3].[H][H]",
+    "smarts": "[C;H3:1](-[H:4])-[C;H2:2](-[H:5])-[C;H3:3]>>[C:1]=[C:2]-[C:3].[H:4]-[H:5]",
     "family": "dehydrogenation",
     "kind": "overall",
     "version": "1",
@@ -86,8 +86,8 @@ Rules are not automatically reversed. Supply a template for the reverse reaction
 1. Standardize seed structures and identify species by structure, phase, and site label.
 2. Match each new species against each reactant slot of each rule once.
 3. Combine newly added candidates with existing candidates and execute ordered reactant tuples that have not been processed. A species may occupy two slots to represent self-coupling.
-4. Standardize products and check valence, element balance (including hydrogen), charge balance, and site-label counts.
-5. Apply `max_carbon`, then merge duplicate reactions by rule ID, reactant stoichiometry, and product stoichiometry. Equivalent template matches are retained in `matches`.
+4. Execute templates with explicit hydrogens. Restore source atom maps and check a one-to-one atom inventory (including elements and isotopes), charge balance, and site-label counts.
+5. Apply `max_carbon`, then merge duplicate reactions by rule ID and stoichiometry. Store one complete representative per symmetry-distinct mapping in `channels`; equivalent executions increment its `match_count` without retaining duplicate records.
 6. Queue new species until the queue is exhausted or the species/reaction budget is reached.
 
 Checks occur when inputs are read and candidate reactions are generated; the full network is not repeatedly revalidated during enumeration. Molecular descriptors and reaction templates are prepared when their objects are created. Enumeration does not estimate barriers or fluxes, and species are not removed merely because they have not been detected experimentally.
@@ -100,9 +100,35 @@ You can create `Species.from_smiles("C=CC", phase="surface", site="BAS")`. Site 
 
 This is an **abstract single-site representation**, suitable for transformations between explicitly defined molecular structures on the same site. Dedicated representations and bundled rules for vacant sites, proton exchange, two-site species, and Ga catalytic cycles are not yet included. Surface structures, hydrogen, and charge must be defined consistently when extending the mechanism; attaching a label to a gas-phase molecule alone does not establish an adsorption mechanism.
 
-Each reaction retains its rule and template-match records. These include reactant order, product order, atom-index-labeled reactant SMILES, and RDKit's raw product-atom provenance. Map numbers in the indexed SMILES equal the input atom index plus one; `react_atom_idx` in the provenance is zero-based. Atoms introduced by the template, such as those in H2, may have no input-atom provenance.
+The abstract site labels do not change atom numbering or symmetry equivalence: phases and site labels are included in reaction-channel comparison.
 
-These records support structural traceability. **`len(reaction.matches)` is not a single-event degeneracy factor.** Rotational symmetry numbers, physical counting of equivalent pathways, transition states, and kinetic parameter sharing require separate implementation. This version does not calculate rates, conversions, or selectivities.
+## Atom mapping and symmetry
+
+Species identity uses unmapped canonical SMILES, phase, and site. `species.mapped_smiles` is a separate explicit-H representation. Existing non-conflicting map numbers are retained; missing numbers, including those of added hydrogens, are allocated above the largest supplied number. Repeated labels within an input are disambiguated. `species.input_maps` records `(assigned_map, supplied_map)` pairs; a supplied value of zero means no label was provided.
+
+```python
+seed = Species.from_smiles("[CH3:101][CH2:205][CH3:309]")
+print(seed.smiles)             # CCC: used for species identity
+print(seed.mapped_smiles)      # Retains carbon maps 101, 205, 309; includes mapped H
+print(dict(seed.input_maps))   # Assigned labels mapped back to supplied labels
+print(seed.symmetry_classes)  # (map_number, symmetry_class) pairs
+```
+
+For a multi-reactant step, each occurrence is numbered separately. Labels that conflict with a previous occurrence are reassigned above all reserved labels. Each match's `atom_mapping` records the reactant slot, source atom index, species-level map, supplied map, and reaction-local map. Thus, two copies of a species can react without sharing atom IDs. Structural seed aliases are stored in `network.seed_inputs`; enumeration uses one representative per species identity.
+
+Templates run on explicit-H molecules. Rules that transfer hydrogen must move mapped H atoms and their bonds explicitly. Creating untraceable atoms, dropping source atoms, or producing duplicate product labels rejects that candidate with reason `atom_mapping`. Charge and site balance are checked separately. Existing implicit-H templates may need rewriting; this release does not silently infer their hydrogen correspondence. The bundled version-2 rules specify overall atom correspondence, not validated elementary hydrogen-transfer mechanisms.
+
+`reaction.channels` stores one complete representative per symmetry-distinct mapped reaction. A record includes `mapped_reaction_smiles`, the mapped reactant/product SMILES lists, source numbering in `atom_mapping`, product-atom provenance, `symmetry_key`, and `match_count`. Reactant occurrence order is retained even when stoichiometry combines two identical species. A duplicate increments the existing channel's `match_count`; its full mapping is discarded. There is no separate `reaction.matches` list or list of duplicate-match indices.
+
+For propane dehydrogenation, 24 template matches yield one stored channel with `match_count=24`. The summary field `template_matches` and CSV columns with that name sum the counters; they do not count stored records.
+
+Channel grouping uses a canonical graph of the complete reaction before and after transformation. Component nodes preserve molecular grouping, phases, and sites. Atomic labels preserve elements, isotopes, charges, radicals, and assigned atom CIP labels; bond labels preserve both sides' bond orders and defined stereo. This avoids treating independent membership in atom symmetry classes as proof of joint reaction equivalence. It also permits exchange of chemically identical reactant occurrences.
+
+Basic atom classes use `CanonicalRankAtoms(breakTies=False, includeAtomMaps=False)`, without enumerating self-matches. Explicit-H neopentane has class sizes 1, 4, and 12. True atom maps remain unique and are never replaced by symmetry-class labels. Defined stereochemistry is retained; new stereoisomers are not exhaustively generated.
+
+These are single-step mappings. Numbers are local to a species representative or a reaction occurrence, not globally unique atom identities throughout the network. Multi-step ancestry requires composing the individual mappings and reconciling product atoms with the species registry representatives; map integers alone do not establish that correspondence. Neither channel counts nor `match_count` values are SEMK degeneracy factors. Physical pathway counting and kinetic parameter sharing remain separate work. This version does not calculate rates, conversions, or selectivities.
+
+New JSON exports use schema version 3 and preserve compact channel representatives, counters, numbering, symmetry classes, and seed inputs. Loading a version-2 file converts its raw matches and channel indices to the compact representation. Version-1 files remain readable as structural networks; their incomplete legacy provenance is not retained as mapped channels. Source atom mappings cannot be recovered from an old unmapped structure.
 
 ## Command line and outputs
 
@@ -112,13 +138,16 @@ After installation, run:
 chemweave generate --config examples/propane.toml --output results/propane
 ```
 
+Use `examples/mapped_propane.toml` to run the same network from a partially mapped seed.
+
 A custom `rules = "my_rules.json"` entry is resolved relative to the configuration file's directory. The output directory is resolved relative to the working directory of the command.
 
 | File | Contents |
 | --- | --- |
-| `network.json` | Complete species, reactions, template matches, rules, configuration, and RDKit version; can be reloaded. |
-| `species.csv` | Species ID, name, structure, molecular formula, charge, phase, and site. |
-| `reactions.csv` | Reaction ID, rule, family, step classification, stoichiometry on both sides, and template-match count. |
+| `network.json` | Complete species, reactions, representative channel mappings and counts, rules, configuration, and RDKit version; can be reloaded. |
+| `species.csv` | Species ID, name, unmapped structure, formula, charge, phase, site, and mapped SMILES. |
+| `reactions.csv` | Reaction ID, rule, family, step classification, stoichiometry on both sides, template-match count, and channel count. |
+| `channels.csv` | One representative mapped reaction and its `match_count` for each symmetry-grouped channel. |
 | `stoichiometry.csv` | Species and positive integer coefficients for each side of each reaction. Assign a negative sign to reactant coefficients when constructing a stoichiometric matrix. |
 | `network.dot` | Graphviz graph with a separate node for each reaction, preserving multiple-reactant and multiple-product relationships. |
 

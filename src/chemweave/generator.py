@@ -49,10 +49,15 @@ class Generator:
                 network.species[sid] = species
                 pending.append(sid)
                 network.seeds.append(sid)
+            network.seed_inputs.append({
+                "species_id": identities[species.key], "mapped_smiles": species.mapped_smiles,
+                "input_maps": species.input_maps, "name": species.name,
+            })
 
         pools = [[[] for _ in range(rule.arity)] for rule in self.rules]
         applications = set()
         reaction_index = {}
+        channel_index = {}
         rejected = Counter()
         while pending:
             sid = pending.popleft()
@@ -90,28 +95,36 @@ class Generator:
                                 rejected["identity"] += 1
                                 continue
                             key = (rule.id, lhs, rhs)
-                            match = {"reactants": list(reactant_ids),
-                                     "products": product_ids, **provenance}
-                            if key in reaction_index:
-                                reaction_index[key].matches.append(match)
-                                continue
-                            if len(network.species) + len(new_species) > self.config.max_species:
-                                network.termination = "max_species"
-                            elif len(network.reactions) >= self.config.max_reactions:
-                                network.termination = "max_reactions"
-                            if network.termination != "exhausted":
-                                network.stats["rejected"] = dict(rejected)
-                                return network
-                            for identity, (pid, s) in new_species.items():
-                                identities[identity] = pid
-                                network.species[pid] = s
-                                pending.append(pid)
-                            reaction = Reaction(
-                                id=f"R{len(network.reactions) + 1:05d}",
-                                reactants=lhs, products=rhs, rule_id=rule.id,
-                                family=rule.family, kind=rule.kind, matches=[match],
-                            )
-                            network.reactions.append(reaction)
-                            reaction_index[key] = reaction
+                            reaction = reaction_index.get(key)
+                            if reaction is None:
+                                if len(network.species) + len(new_species) > self.config.max_species:
+                                    network.termination = "max_species"
+                                elif len(network.reactions) >= self.config.max_reactions:
+                                    network.termination = "max_reactions"
+                                if network.termination != "exhausted":
+                                    network.stats["rejected"] = dict(rejected)
+                                    return network
+                                for identity, (pid, s) in new_species.items():
+                                    identities[identity] = pid
+                                    network.species[pid] = s
+                                    pending.append(pid)
+                                reaction = Reaction(
+                                    id=f"R{len(network.reactions) + 1:05d}",
+                                    reactants=lhs, products=rhs, rule_id=rule.id,
+                                    family=rule.family, kind=rule.kind,
+                                )
+                                network.reactions.append(reaction)
+                                reaction_index[key] = reaction
+                            channel_key = (reaction.id, provenance["symmetry_key"])
+                            if channel_key in channel_index:
+                                channel_index[channel_key]["match_count"] += 1
+                            else:
+                                channel = {
+                                    "reactants": list(reactant_ids),
+                                    "products": product_ids, **provenance,
+                                    "match_count": 1,
+                                }
+                                reaction.channels.append(channel)
+                                channel_index[channel_key] = channel
         network.stats["rejected"] = dict(rejected)
         return network

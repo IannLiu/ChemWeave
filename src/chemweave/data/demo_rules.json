@@ -1,39 +1,42 @@
 [
   {
     "id": "alkane_dehydrogenation",
-    "smarts": "[C;X4;!H0:1]-!@[C;X4;!H0:2]>>[C:1]=[C:2].[H][H]",
+    "smarts": "[C;X4:1](-[H:3])-!@[C;X4:2](-[H:4])>>[C:1]=[C:2].[H:3]-[H:4]",
     "family": "dehydrogenation",
     "kind": "overall",
+    "version": "2",
     "exclude_smarts": ["[#6]=[#6]", "[#6]#[#6]", "[a]", "[R]"],
     "source": "Software demonstration; curated for graph enumeration, not a validated Ga/H-ZSM-5 elementary mechanism.",
     "notes": "Acyclic saturated reactants only. Produces a mono-olefin and H2; does not describe the catalyst cycle."
   },
   {
     "id": "olefin_double_bond_shift",
-    "smarts": "[C:1]=[C:2]-!@[C;X4;!H0:3]>>[C:1]-[C:2]=[C:3]",
+    "smarts": "[C:1]=[C:2]-!@[C;X4:3](-[H:4])>>[C:1](-[H:4])-[C:2]=[C:3]",
     "family": "double_bond_isomerization",
     "kind": "overall",
+    "version": "2",
     "exclude_smarts": ["[R]", "[#6]#[#6]", "[a]"],
     "source": "Software demonstration; not an elementary proton-transfer mechanism.",
     "notes": "Adjacent double-bond migration; directed template applications can generate both directions."
   },
   {
     "id": "terminal_olefin_coupling",
-    "smarts": "[C;H2:1]=[C;H1,H2:2].[C;H2:3]=[C;H1,H2:4]>>[C:1]-[C:2]-[C:3]=[C:4]",
+    "smarts": "[C;H2:1]=[C;H1,H2:2].[C;H2:3](-[H:5])=[C;H1,H2:4]>>[C:1](-[H:5])-[C:2]-[C:3]=[C:4]",
     "family": "oligomerization",
     "kind": "overall",
+    "version": "2",
     "exclude_smarts": ["[R]", "[#6]#[#6]", "[a]"],
     "source": "Software demonstration of a restricted neutral coupling transformation.",
     "notes": "One coupling connectivity for terminal olefins; not all regioisomers or acid-catalysed elementary steps."
   },
   {
     "id": "olefin_scission",
-    "smarts": "[C;X4;!H0:1]-!@[C;X4:2]-!@[C:3]=[C:4]>>[C:1]=[C:2].[C:3]=[C:4]",
+    "smarts": "[C;X4:1](-[H:5])-!@[C;X4:2]-!@[C:3]=[C:4]>>[C:1]=[C:2].[C:3](-[H:5])=[C:4]",
     "family": "scission",
     "kind": "overall",
+    "version": "2",
     "exclude_smarts": ["[R]", "[#6]#[#6]", "[a]"],
     "source": "Software demonstration of neutral olefin cleavage.",
     "notes": "Checks multiple-product stoichiometry; does not explicitly represent a surface alkoxide or carbenium-like transition state."
   }
 ]
-

@@ -8,7 +8,7 @@ import sys
 def test_cli_custom_rules_are_relative_to_config(tmp_path):
     rules = [{
         "id": "dehydrogenation",
-        "smarts": "[CH3:1][CH2:2][CH3:3]>>[CH2:1]=[CH:2][CH3:3].[H][H]",
+        "smarts": "[C;H3:1](-[H:4])-[C;H2:2](-[H:5])-[C;H3:3]>>[C:1]=[C:2]-[C:3].[H:4]-[H:5]",
     }]
     (tmp_path / "rules.json").write_text(json.dumps(rules))
     config = tmp_path / "input.toml"

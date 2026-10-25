@@ -6,7 +6,7 @@ smiles = "CCC"
 name = "propane"
 
 [generation]
+# Structural scope and output-size budgets; these are not iteration counts.
 max_carbon = 6
 max_species = 200
 max_reactions = 1000
-

@@ -46,7 +46,7 @@ restored = Network.from_json("results/network.json")
 
 `load_rules()` 读取内置示例；`load_rules("my_rules.json")` 读取自己的规则文件。`Species` 使用 `from_smiles` 或 `from_mol` 创建，以统一结构、分子式和唯一标识。
 
-在 base 环境（Python 3.12、RDKit 2026.03.6）运行 C6 示例得到 22 个物种、45 条反应。这个数字是运行示例，不作为化学正确性的判据。
+在 base 环境（Python 3.12、RDKit 2026.03.6）运行 C6 示例得到 22 个物种、45 条反应和 45 个对称归并通道。这个数字是运行示例，不作为化学正确性的判据。
 
 ## 自定义规则
 
@@ -56,7 +56,7 @@ restored = Network.from_json("results/network.json")
 [
   {
     "id": "propane_dehydrogenation",
-    "smarts": "[CH3:1][CH2:2][CH3:3]>>[CH2:1]=[CH:2][CH3:3].[H][H]",
+    "smarts": "[C;H3:1](-[H:4])-[C;H2:2](-[H:5])-[C;H3:3]>>[C:1]=[C:2]-[C:3].[H:4]-[H:5]",
     "family": "dehydrogenation",
     "kind": "overall",
     "version": "1",
@@ -86,8 +86,8 @@ restored = Network.from_json("results/network.json")
 1. 标准化种子结构，以结构、相态和位点标签确定物种身份。
 2. 每个新物种只与每条规则的各个反应物位置匹配一次。
 3. 将新加入候选池的物种与已有候选物种组合，执行尚未处理的有序反应物组合。允许同一物种占据两个位置，以表示自偶联。
-4. 标准化产物，检查价态、元素（包括氢）、电荷和位点标签数守恒。
-5. 按 `max_carbon` 筛选，并按规则 ID、反应物计量、产物计量合并重复反应。等价模板匹配记录在 `matches` 中。
+4. 用显式氢执行模板，恢复来源映射号，检查原子一一对应（包括元素和同位素）、电荷和位点标签数守恒。
+5. 按 `max_carbon` 筛选，并按规则 ID 和两侧计量合并重复反应。每种非等价映射只在 `channels` 中保存一个完整代表；等价执行仅累加其 `match_count`，不保留重复记录。
 6. 把新物种加入队列，直到队列耗尽或达到物种/反应预算。
 
 检查放在输入读取和候选反应生成处；正常枚举不重复校验整张网络。分子描述和反应模板在创建时处理一次。当前枚举不估算能垒或通量，也不会仅因某个物种未在实验中检出就删除它。
@@ -100,9 +100,35 @@ restored = Network.from_json("results/network.json")
 
 这是**单个位点标签的抽象表示**，适合相同位点上有明确分子结构的变换。当前未提供空位、质子交换、双位点物种以及 Ga 催化循环的专门表示或内置规则。真实表面结构及其氢、电荷需要在进一步扩展机理时一致定义；给气相分子增加标签本身不能建立真实吸附机理。
 
-每条反应保留规则和模板匹配记录，记录包含反应物顺序、产物顺序、带原子索引标签的反应物 SMILES 及 RDKit 原始产物原子来源。索引 SMILES 的映射值为输入原子索引加一；来源中的 `react_atom_idx` 为零起始索引。H2 等模板新生成的原子可能没有输入来源。
+抽象位点标签不改变原子编号。比较反应通道时，相态和位点标签也参与等价性判断。
 
-这些是结构生成的追溯信息，**`len(reaction.matches)` 不是 Single-event 简并度**。转动对称数、等价路径的物理计数、过渡态和动力学参数共享需要后续独立实现。本版本不计算速率、转化率或选择性。
+## 原子映射与对称性
+
+物种身份由不带映射号的标准 SMILES、相态和位点确定。`species.mapped_smiles` 单独保存显式氢表示。已有且不冲突的映射号保留；缺失编号的原子（包括补出的氢）从已有最大编号之后依次分配。输入内部重复的编号会被消除冲突。`species.input_maps` 保存 `(分配后的编号, 输入编号)` 对，输入编号为零表示原先未提供标签。
+
+```python
+seed = Species.from_smiles("[CH3:101][CH2:205][CH3:309]")
+print(seed.smiles)             # CCC: used for species identity
+print(seed.mapped_smiles)      # Retains carbon maps 101, 205, 309; includes mapped H
+print(dict(seed.input_maps))   # Assigned labels mapped back to supplied labels
+print(seed.symmetry_classes)  # (map_number, symmetry_class) pairs
+```
+
+多分子反应中，每份反应物独立编号。与前一份反应物冲突的编号从全部预留编号之后重新分配。每个匹配记录的 `atom_mapping` 保存反应物位置、来源原子索引、物种内部编号、用户输入编号及本次反应编号。因此，同种物种的两份分子可以参与反应，而不会共享原子 ID。结构相同的种子输入记录在 `network.seed_inputs` 中；网络扩展对每种物种使用一个代表。
+
+模板在显式氢分子上执行。涉及氢转移的规则必须明确移动带映射的氢原子及其化学键。若生成无法追溯的新原子、丢失来源原子或在产物中重复使用编号，候选会以 `atom_mapping` 原因被拒绝；电荷和位点守恒另行检查。旧的隐式氢模板可能需要改写，本版本不会自动猜测氢的对应关系。内置第 2 版规则提供总体反应的原子对应，并不代表已经验证了真实的基元氢转移机理。
+
+`reaction.channels` 对每种非等价反应映射只保存一份完整代表。记录包括 `mapped_reaction_smiles`、两侧带映射的 SMILES 列表、`atom_mapping` 来源编号表、产物原子来源、`symmetry_key` 和 `match_count`。即使计量关系合并了两份相同物种，记录仍区分反应物实例顺序。遇到重复时，仅增加已有通道的 `match_count`，丢弃该次完整映射；不再单独保存 `reaction.matches` 或重复匹配索引列表。
+
+例如，丙烷脱氢的 24 个模板匹配只保存为一个通道，其 `match_count=24`。摘要中的 `template_matches` 和 CSV 同名列为这些计数的总和，不是实际存储的记录数。
+
+通道通过反应前后完整图的标准化表示归并。图中的分子节点保留分组、相态和位点；原子标签保留元素、同位素、电荷、自由基及已指定的原子 CIP 标签；化学键标签保留两侧键级和已定义的立体信息。这样不会仅凭原子各自属于同一对称类别，就认定多位点反应等价；化学上相同的反应物实例则允许整体交换。
+
+基础原子类别通过 `CanonicalRankAtoms(breakTies=False, includeAtomMaps=False)` 计算，不枚举分子自匹配。显式氢新戊烷的类别大小为 1、4、12。真实映射号始终唯一，不会被对称类别标签覆盖。已定义的立体化学会保留；程序不穷举新生成的立体异构体。
+
+这些是单步反应映射。编号属于物种代表或某次反应实例，并非全网唯一的原子身份。多步来源追踪需要连接各步映射，并将产物原子与物种库代表的原子对应起来，不能仅凭编号数值直接连接。通道数及 `match_count` 都不是 SEMK 简并度；物理路径计数和动力学参数共享需要单独处理。本版本不计算速率、转化率或选择性。
+
+新的 JSON 导出使用第 3 版格式，保留精简后的通道代表、计数、编号、对称类别和种子输入。读取第 2 版文件时，会将原始匹配和通道索引转换为精简表示。第 1 版文件仍可作为结构网络读取，其中不完整的旧来源记录不会保留为映射通道；不能从旧的不带编号结构中恢复来源映射。
 
 ## 命令行与输出
 
@@ -112,13 +138,16 @@ restored = Network.from_json("results/network.json")
 chemweave generate --config examples/propane.toml --output results/propane
 ```
 
+可使用 `examples/mapped_propane.toml` 从部分编号的种子生成同样的网络。
+
 自定义配置中的 `rules = "my_rules.json"` 相对于配置文件所在目录解析。输出目录相对于运行命令的目录解析。
 
 | 文件 | 内容 |
 | --- | --- |
-| `network.json` | 完整物种、反应、模板匹配、规则、配置及 RDKit 版本，可重新载入 |
-| `species.csv` | 物种 ID、名称、结构、分子式、电荷、相态和位点 |
-| `reactions.csv` | 反应 ID、规则、反应族、步骤性质、两侧计量和模板匹配数 |
+| `network.json` | 完整物种、反应、通道映射代表与计数、规则、配置及 RDKit 版本，可重新载入 |
+| `species.csv` | 物种 ID、名称、不带映射的结构、分子式、电荷、相态、位点及带映射的 SMILES |
+| `reactions.csv` | 反应 ID、规则、反应族、步骤性质、两侧计量、模板匹配数和通道数 |
+| `channels.csv` | 每个对称等价通道的一份代表性 mapped reaction 及其 `match_count` |
 | `stoichiometry.csv` | 每条反应每一侧的物种及正整数计量数；生成计量矩阵时反应物取负 |
 | `network.dot` | Graphviz 图；每条反应有独立节点，保留多反应物和多产物关系 |
 

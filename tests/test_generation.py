@@ -29,10 +29,11 @@ def test_dehydrogenation_keeps_hydrogen_and_match_provenance(demo_rules):
     assert {s.formula for s in net.species.values()} == {"C3H8", "C3H6", "H2"}
     assert len(net.reactions) == 1
     reaction = net.reactions[0]
-    assert len(reaction.matches) > 1  # equivalent template mappings, not SEMK degeneracy
+    assert len(reaction.channels) == 1
+    assert reaction.channels[0]["match_count"] == 24  # template executions, not SEMK degeneracy
     assert len(reaction.products) == 2
-    match = reaction.matches[0]
-    indexed = Species.from_smiles(match["indexed_reactant_smiles"][0])
+    match = reaction.channels[0]
+    indexed = Species.from_smiles(match["mapped_reactant_smiles"][0])
     assert indexed.smiles == "CCC"
     assert any(atom.get("old_mapno") == 1
                for product in match["product_atom_properties"] for atom in product)
@@ -53,7 +54,7 @@ def test_binary_slots_and_seed_order(demo_rules):
     # Asymmetric slots require ethene first and propene second.
     rule = ReactionRule(
         id="asymmetric", family=rule.family,
-        smarts="[CH2:1]=[CH2:2].[CH2:3]=[CH:4][CH3:5]>>[C:1]-[C:2]-[C:3]=[C:4]-[C:5]",
+        smarts="[C;H2:1]=[C;H2:2].[C;H2:3](-[H:6])=[C;H1:4]-[C;H3:5]>>[C:1](-[H:6])-[C:2]-[C:3]=[C:4]-[C:5]",
     )
     for inputs in (("C=C", "C=CC"), ("C=CC", "C=C")):
         net = Generator([rule], GenerationConfig(max_carbon=5)).generate(
@@ -81,8 +82,8 @@ def test_distinct_rules_with_same_stoichiometry_are_retained(demo_rules):
 
 
 @pytest.mark.parametrize("smarts,reason", [
-    ("[CH3:1][CH3:2]>>[CH2:1]=[CH2:2]", "unbalanced"),
-    ("[CH3:1][CH3:2]>>[CH2+:1][CH3:2].[H+]", "unbalanced"),
+    ("[C:1](-[H:3])-[C:2](-[H:4])>>[C:1]=[C:2]", "atom_mapping"),
+    ("[C:1]-[H:2]>>[C-:1].[H0:2]", "unbalanced"),
     ("[C:1]>>[C:1](C)(C)(C)(C)C", "invalid_structure"),
 ])
 def test_bad_candidate_products_are_discarded(smarts, reason):

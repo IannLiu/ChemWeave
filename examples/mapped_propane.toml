@@ -1,0 +1,9 @@
+# Carbon labels are retained. Missing hydrogen labels are allocated above 309.
+[[seeds]]
+smiles = "[CH3:101][CH2:205][CH3:309]"
+name = "mapped propane"
+
+[generation]
+max_carbon = 6
+max_species = 200
+max_reactions = 1000
