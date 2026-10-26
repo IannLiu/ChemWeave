@@ -14,6 +14,7 @@ class GenerationConfig:
     max_carbon: int = 8
     max_species: int = 1000
     max_reactions: int = 5000
+    max_depth: int | None = None
 
 
 class Generator:
@@ -22,15 +23,20 @@ class Generator:
         self.config = config or GenerationConfig()
         if len({rule.id for rule in self.rules}) != len(self.rules):
             raise ValueError("Rule IDs must be unique")
-        if min(asdict(self.config).values()) < 1:
+        if min(self.config.max_carbon, self.config.max_species, self.config.max_reactions) < 1:
             raise ValueError("Generation limits must be positive")
+        if self.config.max_depth is not None and self.config.max_depth < 0:
+            raise ValueError("max_depth must be nonnegative")
 
-    def generate(self, seeds):
-        """Enumerate the closure within max_carbon, or stop at a size budget.
+    def generate(self, seeds, *, targets=()):
+        """Grow from seeds until exhausted, a limit, or all target species appear.
 
         Each species is matched against each template slot once. Only newly
         available reactant tuples are executed. Ordered tuples are retained:
-        template slots need not be interchangeable.
+        template slots need not be interchangeable. Seeds have depth zero;
+        products have depth one greater than the deepest reactant. FIFO order
+        makes the first discovery of each species its minimum reachable depth.
+        Targets are Species objects; identity includes phase and site.
         """
         network = Network(
             rules=[rule.to_dict() for rule in self.rules], config=asdict(self.config),
@@ -38,6 +44,14 @@ class Generator:
         )
         identities = {}
         pending = deque()
+        target_records = {}
+        for target in targets:
+            target_records.setdefault(target.key, {
+                "smiles": target.smiles, "phase": target.phase, "site": target.site,
+                "name": target.name, "species_id": None,
+            })
+        network.targets = list(target_records.values())
+        remaining_targets = set(target_records)
         for species in seeds:
             if species.carbon_count > self.config.max_carbon:
                 raise ValueError(f"Seed exceeds max_carbon: {species.smiles}")
@@ -47,12 +61,19 @@ class Generator:
                 sid = f"S{len(network.species) + 1:05d}"
                 identities[species.key] = sid
                 network.species[sid] = species
+                network.species_depths[sid] = 0
                 pending.append(sid)
                 network.seeds.append(sid)
+                if species.key in remaining_targets:
+                    target_records[species.key]["species_id"] = sid
+                    remaining_targets.remove(species.key)
             network.seed_inputs.append({
                 "species_id": identities[species.key], "mapped_smiles": species.mapped_smiles,
                 "input_maps": species.input_maps, "name": species.name,
             })
+        if target_records and not remaining_targets:
+            network.termination = "targets_reached"
+            return network
 
         pools = [[[] for _ in range(rule.arity)] for rule in self.rules]
         applications = set()
@@ -61,6 +82,12 @@ class Generator:
         rejected = Counter()
         while pending:
             sid = pending.popleft()
+            depth = network.species_depths[sid]
+            # All remaining species are at least this deep. Boundary species
+            # are retained, but cannot participate in another allowed step.
+            if self.config.max_depth is not None and depth >= self.config.max_depth:
+                network.termination = "max_depth"
+                break
             species = network.species[sid]
             for ri, rule in enumerate(self.rules):
                 for slot in range(rule.arity):
@@ -107,11 +134,16 @@ class Generator:
                                 for identity, (pid, s) in new_species.items():
                                     identities[identity] = pid
                                     network.species[pid] = s
+                                    network.species_depths[pid] = depth + 1
                                     pending.append(pid)
+                                    if identity in remaining_targets:
+                                        target_records[identity]["species_id"] = pid
+                                        remaining_targets.remove(identity)
                                 reaction = Reaction(
                                     id=f"R{len(network.reactions) + 1:05d}",
                                     reactants=lhs, products=rhs, rule_id=rule.id,
                                     family=rule.family, kind=rule.kind,
+                                    depth=depth + 1,
                                 )
                                 network.reactions.append(reaction)
                                 reaction_index[key] = reaction
@@ -126,5 +158,9 @@ class Generator:
                                 }
                                 reaction.channels.append(channel)
                                 channel_index[channel_key] = channel
+                            if target_records and not remaining_targets:
+                                network.termination = "targets_reached"
+                                network.stats["rejected"] = dict(rejected)
+                                return network
         network.stats["rejected"] = dict(rejected)
         return network

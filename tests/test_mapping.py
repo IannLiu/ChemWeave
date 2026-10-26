@@ -208,7 +208,7 @@ def test_compact_channels_keep_one_mapping_and_only_increment_count(smiles, prod
     path = tmp_path / "compact.json"
     net.export_json(path)
     data = json.loads(path.read_text())
-    assert data["schema_version"] == 3
+    assert data["schema_version"] == 4
     assert all("matches" not in r for r in data["reactions"])
     assert sum(len(r["channels"]) for r in data["reactions"]) == len(products)
 
@@ -236,5 +236,5 @@ def test_version_two_json_compacts_redundant_records_on_load(dehydrogenation, tm
     assert restored.summary() == net.summary()
     restored.export_json(path)
     compact = json.loads(path.read_text())
-    assert compact["schema_version"] == 3
+    assert compact["schema_version"] == 4
     assert "matches" not in compact["reactions"][0]

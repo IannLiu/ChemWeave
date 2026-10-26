@@ -128,7 +128,58 @@ print(seed.symmetry_classes)  # (map_number, symmetry_class) pairs
 
 这些是单步反应映射。编号属于物种代表或某次反应实例，并非全网唯一的原子身份。多步来源追踪需要连接各步映射，并将产物原子与物种库代表的原子对应起来，不能仅凭编号数值直接连接。通道数及 `match_count` 都不是 SEMK 简并度；物理路径计数和动力学参数共享需要单独处理。本版本不计算速率、转化率或选择性。
 
-新的 JSON 导出使用第 3 版格式，保留精简后的通道代表、计数、编号、对称类别和种子输入。读取第 2 版文件时，会将原始匹配和通道索引转换为精简表示。第 1 版文件仍可作为结构网络读取，其中不完整的旧来源记录不会保留为映射通道；不能从旧的不带编号结构中恢复来源映射。
+新的 JSON 导出使用第 4 版格式，保留精简后的通道代表、计数、编号、对称类别、种子输入、物种及反应深度和目标状态。第 3 版文件仍可读取；旧文件缺失的深度保持未知。读取第 2 版文件时，会将原始匹配和通道索引转换为精简表示。第 1 版文件仍可作为结构网络读取，其中不完整的旧来源记录不会保留为映射通道；不能从旧的不带编号结构中恢复来源映射。
+
+## 深度与目标物种停止条件
+
+设置 `GenerationConfig(max_depth=2)`，允许从种子出发最多经过两步连续反应。种子的深度为 0，反应深度定义为：
+
+```text
+反应深度 = 1 + 所有反应物深度的最大值
+新产物深度 = 反应深度
+```
+
+每个物种保留其最小可达深度。FIFO 队列按深度递增发现物种，多种种子或双分子反应也适用。循环反应不会增加已登记物种的深度。对于双分子反应，深度衡量最长依赖链，不将两条并行制备支路的反应次数相加。生成已有浅层物种的反应，仍记录自身的反应深度。
+
+达到深度上限的产物及其生成反应、映射都会保留，但不再从这些物种继续扩展。`max_depth=0` 只保留种子；不设置该参数则不限制深度。如果网络提前穷尽，则不必达到深度上限。使用内置规则时，丙烷深度为 0，丙烯和 H2 为 1，丙烯自偶联生成的 C6 烯烃为 2。可运行 `examples/depth_limited.toml`。
+
+指定具体的目标物种，在它们**全部出现**时停止：
+
+```python
+network = Generator(
+    load_rules(),
+    GenerationConfig(max_carbon=6, max_depth=4),
+).generate(
+    [Species.from_smiles("CCC")],
+    targets=[Species.from_smiles("C=CC"), Species.from_smiles("C=C")],
+)
+print(network.summary())
+print(network.species_depths)  # 物种 ID -> 最小深度
+print(network.targets)        # 目标结构及已发现的物种 ID
+```
+
+目标沿用物种库的身份判定：标准化结构、相态和位点相同，忽略 atom-map 编号和名称。重复目标只计一次；已在种子中的目标立即计为找到。指定目标不会将它加入网络。这是结构可达性条件，不判断实验浓度或检测限。`max_species` 仍限制网络中存储的物种总数。
+
+TOML 使用与 `[[seeds]]` 相同字段的 `[[targets]]` 条目：
+
+```toml
+[[seeds]]
+smiles = "CCC"
+
+[[targets]]
+smiles = "C=CC"
+
+[[targets]]
+smiles = "C=C"
+
+[generation]
+max_carbon = 6
+max_depth = 4
+```
+
+`examples/target_species.toml` 提供带标签和数量预算的完整示例。两个条件可以同时设置：达到深度边界时停止；如果目标提前全部出现，则提前停止。摘要中提供 `depth_reached`、`targets_total`、`targets_found` 和 `missing_targets`。`network.targets` 每个目标的 `species_id` 为找到的物种 ID，未找到时为 `None`。
+
+目标达成后，程序保存当前接受的完整反应、全部共生成物和满足条件的通道映射，随即返回。尚未遍历的匹配、通道和替代路径不会继续枚举，因此匹配计数可能不完整。这样的部分网络受种子和规则的枚举顺序影响，不表示已收集所有最短路径。
 
 ## 命令行与输出
 
@@ -144,16 +195,25 @@ chemweave generate --config examples/propane.toml --output results/propane
 
 | 文件 | 内容 |
 | --- | --- |
-| `network.json` | 完整物种、反应、通道映射代表与计数、规则、配置及 RDKit 版本，可重新载入 |
-| `species.csv` | 物种 ID、名称、不带映射的结构、分子式、电荷、相态、位点及带映射的 SMILES |
-| `reactions.csv` | 反应 ID、规则、反应族、步骤性质、两侧计量、模板匹配数和通道数 |
+| `network.json` | 完整物种、反应、深度、目标状态、通道映射代表与计数、规则、配置及 RDKit 版本，可重新载入 |
+| `species.csv` | 物种 ID、名称、不带映射的结构、分子式、电荷、相态、位点、带映射的 SMILES 及最小深度 |
+| `reactions.csv` | 反应 ID、规则、反应族、步骤性质、两侧计量、模板匹配数、通道数及反应深度 |
 | `channels.csv` | 每个对称等价通道的一份代表性 mapped reaction 及其 `match_count` |
 | `stoichiometry.csv` | 每条反应每一侧的物种及正整数计量数；生成计量矩阵时反应物取负 |
 | `network.dot` | Graphviz 图；每条反应有独立节点，保留多反应物和多产物关系 |
 
 DOT 导出不依赖 Graphviz；如已安装 Graphviz，可用 `dot -Tsvg results/propane/network.dot -o results/propane/network.svg` 绘图。
 
-`termination="exhausted"` 表示在所选规则和碳数范围内没有待处理组合。`max_species` 或 `max_reactions` 表示预算中止，此时结果是部分网络，仍会保存。命令行正常完成退出码为 0，预算中止为 2，输入错误由 Python/RDKit 报告。
+保存结果中的 `termination` 表示停止原因：
+
+| 值 | 含义 |
+| --- | --- |
+| `exhausted` | 所选规则和碳数范围内没有待处理组合；目标仍可能缺失 |
+| `max_depth` | 达到深度边界，包含该深度的产物 |
+| `targets_reached` | 所有目标均已出现，也可能已经包含在种子中 |
+| `max_species`、`max_reactions` | 数量预算不允许加入下一条完整反应，保存结构一致的部分网络 |
+
+网络穷尽、达到深度边界或找到全部目标时，命令行在**没有缺失目标**的前提下返回退出码 0。数量预算中止或仍缺失目标时返回 2，结果仍会保存。输入错误由 Python/RDKit 报告。
 
 ## 后续扩展
 

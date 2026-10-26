@@ -1,0 +1,17 @@
+[[seeds]]
+smiles = "CCC"
+name = "propane"
+
+[[targets]]
+smiles = "C=CC"
+name = "propene"
+
+[[targets]]
+smiles = "C=C"
+name = "ethene"
+
+[generation]
+max_carbon = 6
+max_species = 200
+max_reactions = 1000
+max_depth = 4

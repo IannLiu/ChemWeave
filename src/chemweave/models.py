@@ -109,6 +109,7 @@ class Reaction:
     family: str
     kind: str
     channels: list[dict] = field(default_factory=list)
+    depth: int | None = None
 
 
 @dataclass(slots=True)
@@ -117,6 +118,8 @@ class Network:
     reactions: list[Reaction] = field(default_factory=list)
     seeds: list[str] = field(default_factory=list)
     seed_inputs: list[dict] = field(default_factory=list)
+    species_depths: dict[str, int] = field(default_factory=dict)
+    targets: list[dict] = field(default_factory=list)
     rules: list[dict] = field(default_factory=list)
     config: dict = field(default_factory=dict)
     stats: dict = field(default_factory=dict)
@@ -129,6 +132,10 @@ class Network:
             "channels": sum(len(r.channels) for r in self.reactions),
             "template_matches": sum(c["match_count"] for r in self.reactions for c in r.channels),
             "termination": self.termination,
+            "depth_reached": max(self.species_depths.values(), default=None),
+            "targets_total": len(self.targets),
+            "targets_found": sum(t["species_id"] is not None for t in self.targets),
+            "missing_targets": [t for t in self.targets if t["species_id"] is None],
             **self.stats,
         }
 
@@ -137,17 +144,19 @@ class Network:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         data = {
-            "schema_version": 3,
+            "schema_version": 4,
             "species": [
                 {"id": sid, "smiles": s.smiles, "formula": s.formula,
                  "phase": s.phase, "site": s.site, "name": s.name,
                  "mapped_smiles": s.mapped_smiles, "input_maps": s.input_maps,
-                 "symmetry_classes": s.symmetry_classes}
+                 "symmetry_classes": s.symmetry_classes,
+                 "depth": self.species_depths.get(sid)}
                 for sid, s in self.species.items()
             ],
             "reactions": [asdict(r) for r in self.reactions],
             "seeds": self.seeds,
             "seed_inputs": self.seed_inputs,
+            "targets": self.targets,
             "rules": self.rules,
             "config": self.config,
             "stats": self.stats,
@@ -158,7 +167,7 @@ class Network:
     @classmethod
     def from_json(cls, path):
         data = json.loads(Path(path).read_text(encoding="utf-8"))
-        if data["schema_version"] not in (1, 2, 3):
+        if data["schema_version"] not in (1, 2, 3, 4):
             raise ValueError(f"Unsupported network schema: {data['schema_version']}")
         species = {}
         for record in data["species"]:
@@ -189,6 +198,8 @@ class Network:
         return cls(
             species=species, reactions=reactions, seeds=data["seeds"],
             seed_inputs=data.get("seed_inputs", []),
+            species_depths={r["id"]: r["depth"] for r in data["species"] if r.get("depth") is not None},
+            targets=data.get("targets", []),
             rules=data["rules"], config=data["config"],
             stats=data["stats"], termination=data["termination"],
         )
@@ -199,17 +210,18 @@ class Network:
         directory.mkdir(parents=True, exist_ok=True)
         with (directory / "species.csv").open("w", encoding="utf-8-sig", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["id", "name", "smiles", "formula", "charge", "phase", "site", "mapped_smiles"])
+            writer.writerow(["id", "name", "smiles", "formula", "charge", "phase", "site", "mapped_smiles", "depth"])
             for sid, s in self.species.items():
-                writer.writerow([sid, s.name, s.smiles, s.formula, s.charge, s.phase, s.site, s.mapped_smiles])
+                writer.writerow([sid, s.name, s.smiles, s.formula, s.charge, s.phase, s.site, s.mapped_smiles,
+                                 self.species_depths.get(sid)])
         with (directory / "reactions.csv").open("w", encoding="utf-8-sig", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["id", "rule_id", "family", "kind", "reactants", "products", "template_matches", "channels"])
+            writer.writerow(["id", "rule_id", "family", "kind", "reactants", "products", "template_matches", "channels", "depth"])
             for r in self.reactions:
                 left = " + ".join(f"{n} {sid}" for sid, n in r.reactants)
                 right = " + ".join(f"{n} {sid}" for sid, n in r.products)
                 count = sum(c["match_count"] for c in r.channels)
-                writer.writerow([r.id, r.rule_id, r.family, r.kind, left, right, count, len(r.channels)])
+                writer.writerow([r.id, r.rule_id, r.family, r.kind, left, right, count, len(r.channels), r.depth])
         with (directory / "channels.csv").open("w", encoding="utf-8-sig", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(["reaction_id", "channel", "mapped_reaction_smiles", "template_matches"])

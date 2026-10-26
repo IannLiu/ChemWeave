@@ -128,7 +128,58 @@ Basic atom classes use `CanonicalRankAtoms(breakTies=False, includeAtomMaps=Fals
 
 These are single-step mappings. Numbers are local to a species representative or a reaction occurrence, not globally unique atom identities throughout the network. Multi-step ancestry requires composing the individual mappings and reconciling product atoms with the species registry representatives; map integers alone do not establish that correspondence. Neither channel counts nor `match_count` values are SEMK degeneracy factors. Physical pathway counting and kinetic parameter sharing remain separate work. This version does not calculate rates, conversions, or selectivities.
 
-New JSON exports use schema version 3 and preserve compact channel representatives, counters, numbering, symmetry classes, and seed inputs. Loading a version-2 file converts its raw matches and channel indices to the compact representation. Version-1 files remain readable as structural networks; their incomplete legacy provenance is not retained as mapped channels. Source atom mappings cannot be recovered from an old unmapped structure.
+New JSON exports use schema version 4 and preserve compact channel representatives, counters, numbering, symmetry classes, seed inputs, species/reaction depths, and target status. Version-3 files remain readable; depths absent from older files are left unknown. Loading a version-2 file converts its raw matches and channel indices to the compact representation. Version-1 files remain readable as structural networks; their incomplete legacy provenance is not retained as mapped channels. Source atom mappings cannot be recovered from an old unmapped structure.
+
+## Depth and target stopping
+
+Set `GenerationConfig(max_depth=2)` to allow at most two successive reaction steps from the seeds. Seeds have depth 0. For each reaction:
+
+```text
+reaction depth = 1 + max(depth of every reactant)
+new product depth = reaction depth
+```
+
+A species keeps its minimum reachable depth. FIFO processing discovers species in increasing depth order, including when several seeds or bimolecular reactions are present. Cycles do not increase a registered species's depth. For a bimolecular step, this measures the longest dependency chain; parallel preparation branches are not added together. A reaction returning to an earlier species still has its own reaction depth.
+
+Products at the depth limit are retained, along with the reaction and mappings that generated them. They are not expanded further. `max_depth=0` keeps only the seeds; omitting it leaves depth unrestricted. An exhausted network may stop before reaching the configured depth. With the bundled rules, propane is at depth 0, propene and H2 at depth 1, and propene self-coupling produces a C6 olefin at depth 2. Try `examples/depth_limited.toml`.
+
+Pass specific target species to stop once **all** have appeared:
+
+```python
+network = Generator(
+    load_rules(),
+    GenerationConfig(max_carbon=6, max_depth=4),
+).generate(
+    [Species.from_smiles("CCC")],
+    targets=[Species.from_smiles("C=CC"), Species.from_smiles("C=C")],
+)
+print(network.summary())
+print(network.species_depths)  # species ID -> minimum depth
+print(network.targets)        # requested identities and discovered species IDs
+```
+
+Targets use the same identity as the registry: canonical structure, phase, and site, ignoring atom-map numbers and names. Duplicate targets count once; targets already present among seeds count immediately. Specifying targets does not add them to the network. This is a structural reachability condition, independent of experimental concentrations or detection limits. `max_species` continues to limit the total number of stored species.
+
+In TOML, use `[[targets]]` entries with the same fields as `[[seeds]]`:
+
+```toml
+[[seeds]]
+smiles = "CCC"
+
+[[targets]]
+smiles = "C=CC"
+
+[[targets]]
+smiles = "C=C"
+
+[generation]
+max_carbon = 6
+max_depth = 4
+```
+
+`examples/target_species.toml` contains this configuration with labels and size budgets. The two conditions can be combined: stop at the depth boundary, or earlier when all targets appear. The summary reports `depth_reached`, `targets_total`, `targets_found`, and `missing_targets`. Each target in `network.targets` has its discovered `species_id`, or `None` when missing.
+
+Target stopping saves the complete accepted reaction, all its coproducts, and the channel mapping that satisfied the condition, then returns immediately. Unvisited matches, channels, and alternative pathways are not enumerated, so match counters can be incomplete. The resulting partial network depends on seed/rule enumeration order and does not establish that every shortest pathway has been collected.
 
 ## Command line and outputs
 
@@ -144,16 +195,25 @@ A custom `rules = "my_rules.json"` entry is resolved relative to the configurati
 
 | File | Contents |
 | --- | --- |
-| `network.json` | Complete species, reactions, representative channel mappings and counts, rules, configuration, and RDKit version; can be reloaded. |
-| `species.csv` | Species ID, name, unmapped structure, formula, charge, phase, site, and mapped SMILES. |
-| `reactions.csv` | Reaction ID, rule, family, step classification, stoichiometry on both sides, template-match count, and channel count. |
+| `network.json` | Complete species, reactions, depths, target status, representative channel mappings and counts, rules, configuration, and RDKit version; can be reloaded. |
+| `species.csv` | Species ID, name, unmapped structure, formula, charge, phase, site, mapped SMILES, and minimum depth. |
+| `reactions.csv` | Reaction ID, rule, family, step classification, stoichiometry on both sides, template-match count, channel count, and reaction depth. |
 | `channels.csv` | One representative mapped reaction and its `match_count` for each symmetry-grouped channel. |
 | `stoichiometry.csv` | Species and positive integer coefficients for each side of each reaction. Assign a negative sign to reactant coefficients when constructing a stoichiometric matrix. |
 | `network.dot` | Graphviz graph with a separate node for each reaction, preserving multiple-reactant and multiple-product relationships. |
 
 DOT export does not require Graphviz. If Graphviz is installed, render the graph with `dot -Tsvg results/propane/network.dot -o results/propane/network.svg`.
 
-`termination="exhausted"` means there are no pending combinations within the selected rules and carbon-number range. `max_species` or `max_reactions` indicates a budget stop; the saved result is a partial network. The command exits with code 0 on completion and 2 on a budget stop. Input errors are reported by Python/RDKit.
+The saved `termination` states why generation stopped:
+
+| Value | Meaning |
+| --- | --- |
+| `exhausted` | No pending combinations remain within the selected rules and carbon-number range. Targets may still be missing. |
+| `max_depth` | The configured depth boundary was reached; products at that depth are included. |
+| `targets_reached` | All requested target species are present, possibly already among the seeds. |
+| `max_species`, `max_reactions` | A size budget prevented adding the next complete reaction; a consistent partial network is saved. |
+
+The command exits with code 0 for exhaustion, depth completion, or target success **provided no requested targets are missing**. A size-budget stop or missing targets returns 2; outputs are still saved. Input errors are reported by Python/RDKit.
 
 ## Further development
 
