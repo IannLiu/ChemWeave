@@ -35,7 +35,7 @@ python -m pip install -e ".[web]"
 python -m chemweave web
 ```
 
-安装完成且对应环境已激活时，也可以使用等价命令 `chemweave web`。使用网页期间保持终端打开。浏览器会自动打开 `http://127.0.0.1:8765`；如果没有自动打开，可手动输入该地址。网页界面使用英文。输入初始物种 SMILES 和可选名称，勾选规则，设置碳数、深度后点击“Generate”（生成）。可添加目标物种，全部出现后提前停止；展开各物种的“Phase and site”（相态与位点）可以设置对应状态。
+安装完成且对应环境已激活时，也可以使用等价命令 `chemweave web`。使用网页期间保持终端打开。浏览器会自动打开 `http://127.0.0.1:8765`；如果没有自动打开，可手动输入该地址。网页界面使用英文。输入初始物种 SMILES 和可选名称，勾选规则，设置碳数、深度后点击“Generate”（生成）。可添加目标物种来记录实验产物。“Stop when all targets are found”（找到所有目标后停止）默认开启；寻找替代生成途径时请关闭；展开各物种的“Phase and site”（相态与位点）可以设置对应状态。
 
 中间图使用分子结构节点和独立的反应节点，边上显示非 1 的计量系数。点击节点可以查看物种或反应详情、切换映射通道、显示该反应实际保存的 atom-map 编号。可以搜索、按深度筛选或查看选中节点附近。超过 80 个物种时，默认显示到第 2 层，可通过深度选项展开。筛选后只显示包含全部反应物和共生成物的完整反应。运行期间更新统计信息，结束后绘制网络。
 
@@ -227,6 +227,46 @@ max_depth = 4
 `examples/target_species.toml` 提供带标签和数量预算的完整示例。两个条件可以同时设置：达到深度边界时停止；如果目标提前全部出现，则提前停止。摘要中提供 `depth_reached`、`targets_total`、`targets_found` 和 `missing_targets`。`network.targets` 每个目标的 `species_id` 为找到的物种 ID，未找到时为 `None`。
 
 目标达成后，程序保存当前接受的完整反应、全部共生成物和满足条件的通道映射，随即返回。尚未遍历的匹配、通道和替代路径不会继续枚举，因此匹配计数可能不完整。这样的部分网络受种子和规则的枚举顺序影响，不表示已收集所有最短路径。
+
+## 目标产物生成途径
+
+生成或打开网络后，在左侧 **Formation pathways**（生成途径）中选择产物，设置 **Max reactions per route**（每条途径的最大反应数）和 **Max pathways**（最多返回的途径数），点击 **Analyze formation**。也可以在物种详情中直接点击 **Analyze formation**。为收集替代途径，生成网络前应关闭 **Stop when all targets are found**。分析只使用已有网络，不会继续扩展此前提前停止的网络。
+
+选择单条途径，可以按一个可执行顺序查看反应；选择 **Union of found pathways** 可以对比所有已找到途径的并集。每个反应保留完整反应物、共生成物、计量系数和映射通道。并集用于比较，不代表其中任意组合都构成一条有效途径。途径视图不受网络深度显示过滤器限制，以保留完整反应；**Reset view** 返回完整网络。分析期间可以点击 **Stop**，已找到的途径会保留。**Save project** 保存最近的分析结果，**Export pathways JSON** 将分析结果与原网络一同导出。
+
+```python
+from chemweave import GenerationConfig, Generator, Species, find_pathways, load_rules
+
+network = Generator(load_rules(), GenerationConfig(
+    max_carbon=6, max_depth=4, stop_when_targets_found=False,
+)).generate([Species.from_smiles("CCC")], targets=[Species.from_smiles("C=C")])
+
+target_id = network.targets[0]["species_id"]
+if target_id is not None:
+    result = find_pathways(network, target_id, max_reactions=8, max_pathways=100)
+    for route in result["pathways"]:
+        print(route["reactions"])  # 按一个有效执行顺序排列的反应 ID
+    print(result["termination"], result["network_search_complete"])
+```
+
+使用内置规则，这个例子会得到两条各含四个反应的乙烯生成途径。`examples/formation_pathways.toml` 可以通过命令行生成同一网络。分析保存的网络时，将下面的 `S00008` 替换为文件中目标产物的 ID：
+
+```bash
+python -m chemweave generate --config examples/formation_pathways.toml --output results
+python -m chemweave pathways --network results/network.json --target S00008 --max-reactions 8 --max-pathways 100 --output results/pathways.json
+```
+
+`stop_when_targets_found = false` 放在 TOML 的 `[generation]` 段中；省略时保留原先的目标提前停止行为。`pathways` 命令在途径枚举触及数量上限或原网络提前停止时返回退出码 2，仍保存结果。枚举完成但没有匹配途径时返回 0，结果列表为空。
+
+分析器先反向收集候选生成反应，再从种子出发正向枚举反应集合。只有全部反应物都有来源时，反应才可执行；仅当删除集合中的任意一个反应都会使目标不可达时，才保留该途径。这会排除多余制备支路和产物回收绕路，同时保留长短不同的替代途径。共享制备反应只计一次，共生成物可以供其他分支使用。如果图中的环同时产生了必需的共生成物，不会仅因结构成环而被删除；排除的是依赖尚无种子来源的物质来启动的循环。相同反应集合的不同独立分支执行顺序只算一条途径。若目标已经属于初始种子，返回一条零反应途径。
+
+参数与结果的含义：
+
+- `max_reactions` 统计**所有分支**中的不同反应。例如 `A → B`、`A → C`、`B + C → P` 包含三个反应，尽管依赖深度为二。网络记录的最小深度不代表每条替代途径的长度上限。
+- 结果判断物种是否有来源，不计算有限投料、重复反应事件、净产率或动力学。例如自偶联要求该物种有来源，但不核算库存中是否还剩两个分子；计量系数仍保留供查看。
+- 映射通道保留在原始反应记录中，不枚举通道组合，也不为整条途径重新拼接连续的 atom mapping。
+- `termination="exhausted"` 表示在**当前保存的网络和途径反应数上限内**完成枚举。`max_pathways` 表示触及数量上限，未确认枚举完整；`user_stopped` 表示用户停止。搜索依照保存的反应顺序，不是最短途径或动力学排序。
+- 只有原网络因 `exhausted` 或 `max_depth` 停止时，`network_search_complete` 才为真，且仅相对于其规则与配置范围。目标提前停止、物种/反应数量上限和用户停止均可能遗漏替代途径，即使途径枚举本身完成也一样。网页分别提示网络搜索和途径枚举的完整性。
 
 ## 命令行与输出
 

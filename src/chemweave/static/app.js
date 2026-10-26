@@ -7,6 +7,7 @@ const ruleNames = {alkane_dehydrogenation:'Alkane dehydrogenation',olefin_double
 const reasons = {exhausted:'Network exhausted',max_depth:'Depth limit reached',targets_reached:'All targets found',max_species:'Species limit reached',max_reactions:'Reaction limit reached',user_stopped:'Stopped by user'};
 let builtinRules = [], availableRules = [], network = null, speciesById = new Map(), reactionsById = new Map();
 let selectedId = null, focusId = null, loadedRevision = -1, busy = false, polling = false;
+let analysis = null, pathwayReactionIds = null;
 const emptyInspector = $('details').innerHTML;
 
 const cy = cytoscape({
@@ -100,12 +101,16 @@ function fillSettings(request) {
   for (const record of request.targets || []) addSpecies('targets',record);
   const config = request.config || {};
   for (const [id,key,fallback] of [['max-carbon','max_carbon',6],['max-depth','max_depth',null],['max-species','max_species',200],['max-reactions','max_reactions',1000]]) $(id).value = config[key] ?? fallback ?? '';
+  $('stop-on-targets').checked = config.stop_when_targets_found ?? true;
   renderRules(request.rules || builtinRules,request.rules ? 'Project rules' : 'Built-in demo rules');
 }
 
 function setBusy(value) {
   busy = value;
   $('configuration-fields').disabled = value;
+  $('pathway-fields').disabled = value;
+  $('pathway-view').disabled = value;
+  $('export-pathways').disabled = value;
   $('run').hidden = value;
   $('stop').hidden = !value;
   $('stop').disabled = false;
@@ -122,12 +127,14 @@ async function startGeneration(event) {
   const rules = Array.from($('rules').querySelectorAll('input:checked')).map(input => availableRules[Number(input.dataset.ruleIndex)]);
   if (!seeds.length) return message('Add at least one seed species.');
   if (!rules.length) return message('Select at least one reaction rule.');
-  const request = {seeds,targets:records('targets'),rules,config:{max_carbon:Number($('max-carbon').value),max_depth:$('max-depth').value === '' ? null : Number($('max-depth').value),max_species:Number($('max-species').value),max_reactions:Number($('max-reactions').value)}};
+  const request = {seeds,targets:records('targets'),rules,config:{stop_when_targets_found:$('stop-on-targets').checked,max_carbon:Number($('max-carbon').value),max_depth:$('max-depth').value === '' ? null : Number($('max-depth').value),max_species:Number($('max-species').value),max_reactions:Number($('max-reactions').value)}};
   message();
   setBusy(true);
   try {
     await api('/api/run',{method:'POST',body:JSON.stringify(request)});
     network = null;
+    analysis = pathwayReactionIds = null;
+    $('pathway-panel').hidden = true;
     selectedId = focusId = null;
     cy.elements().remove();
     $('details').innerHTML = emptyInspector;
@@ -142,6 +149,8 @@ function loadNetwork(payload, restoreSettings = false) {
   speciesById = new Map(network.species.map(s => [s.id,s]));
   reactionsById = new Map(network.reactions.map(r => [r.id,r]));
   selectedId = focusId = null;
+  analysis = payload.analysis || null;
+  pathwayReactionIds = null;
   $('search').value = '';
   $('details').innerHTML = emptyInspector;
   const maxDepth = Math.max(0,...network.species.map(s => s.depth ?? 0));
@@ -151,7 +160,8 @@ function loadNetwork(payload, restoreSettings = false) {
   $('network-count').textContent = `${network.species.length} species · ${network.reactions.length} reactions`;
   $('empty-state').hidden = true;
   if (restoreSettings && payload.request) fillSettings(payload.request);
-  renderGraph();
+  renderPathways();
+  if (!analysis) renderGraph();
   if (network.targets.length) {
     const found = network.targets.filter(t => t.species_id).length;
     $('details').innerHTML = `<div class="detail-content"><div class="target-progress">Targets found: ${found} / ${network.targets.length}<ul>${network.targets.map(t => `<li>${t.species_id ? '✓' : '○'} ${escapeHTML(t.name || t.smiles)}${t.phase !== 'gas' ? ' · '+escapeHTML(t.phase) : ''}${t.site ? ' · '+escapeHTML(t.site) : ''}</li>`).join('')}</ul></div>${emptyInspector}</div>`;
@@ -165,6 +175,11 @@ function renderGraph() {
   let species = network.species.filter(s => s.depth == null || s.depth <= bound);
   const allowed = new Set(species.map(s => s.id));
   let reactions = network.reactions.filter(r => (r.depth == null || r.depth <= bound) && [...r.reactants,...r.products].every(([sid]) => allowed.has(sid)));
+  if (pathwayReactionIds !== null) {
+    reactions = network.reactions.filter(r => pathwayReactionIds.has(r.id));
+    const included = new Set([analysis.target, ...reactions.flatMap(r => [...r.reactants,...r.products].map(([sid]) => sid))]);
+    species = network.species.filter(s => included.has(s.id));
+  }
   if (focusId) {
     reactions = reactions.filter(r => r.id === focusId || [...r.reactants,...r.products].some(([sid]) => sid === focusId));
     const nearby = new Set(reactions.flatMap(r => [...r.reactants,...r.products].map(([sid]) => sid)));
@@ -172,6 +187,7 @@ function renderGraph() {
     species = species.filter(s => nearby.has(s.id));
   }
   const targets = new Set(network.targets.map(t => t.species_id).filter(Boolean));
+  if (pathwayReactionIds !== null) targets.add(analysis.target);
   const nodes = species.map(s => ({data:{id:s.id,kind:'species',label:`${s.name || s.formula}\n${s.id}`,image:moleculeURL(s.smiles),column:(s.depth ?? 0)*2},classes:[network.seeds.includes(s.id) ? 'seed' : '',targets.has(s.id) ? 'target' : ''].join(' ')}));
   const edges = [];
   for (const reaction of reactions) {
@@ -192,7 +208,8 @@ function renderGraph() {
   if (cy.zoom() > 1.25) { cy.zoom(1.25); cy.center(); }
   if (selectedId && cy.getElementById(selectedId).length) cy.getElementById(selectedId).select();
   $('visible-count').textContent = `Showing ${species.length} / ${network.species.length} species · ${reactions.length} / ${network.reactions.length} reactions`;
-  $('view-note').textContent = network.species.every(s => s.depth == null) ? 'Depth is not recorded in this legacy file' : (focusId ? 'Neighborhood view · Complete reactions' : 'Arranged by minimum depth');
+  $('depth-filter').disabled = pathwayReactionIds !== null || network.species.every(s => s.depth == null);
+  $('view-note').textContent = pathwayReactionIds !== null ? 'Formation pathways · Complete reactions' : network.species.every(s => s.depth == null) ? 'Depth is not recorded in this legacy file' : (focusId ? 'Neighborhood view · Complete reactions' : 'Arranged by minimum depth');
   $('neighbors').classList.toggle('active',Boolean(focusId));
   searchGraph();
 }
@@ -218,7 +235,9 @@ function selectNode(id) {
   if (speciesById.has(id)) {
     const s = speciesById.get(id);
     const related = network.reactions.filter(r => [...r.reactants,...r.products].some(([sid]) => sid === id));
-    $('details').innerHTML = `<div class="detail-content"><span class="detail-kicker">SPECIES · ${escapeHTML(s.id)}</span><h3>${escapeHTML(s.name || s.formula)}</h3>${network.seeds.includes(id) ? '<span class="detail-tag">Seed species</span>' : ''}${network.targets.some(t => t.species_id === id) ? '<span class="detail-tag target">Target species</span>' : ''}<img class="structure-image" src="${escapeHTML(moleculeURL(s.smiles))}" alt="${escapeHTML(s.smiles)}"><label class="map-toggle"><input id="species-map" type="checkbox">Show species atom-map numbers</label><dl><dt>SMILES</dt><dd><code>${escapeHTML(s.smiles)}</code></dd><dt>Formula / minimum depth</dt><dd>${escapeHTML(s.formula)} · ${s.depth == null ? 'Unknown' : 'Depth '+s.depth}</dd><dt>Phase / site</dt><dd>${escapeHTML(s.phase)} / ${escapeHTML(s.site || '—')}</dd></dl><div class="detail-label"><h4>Related reactions</h4><span class="optional">${related.length} reactions</span></div><div class="related-list">${related.map(r => `<button type="button" data-related="${escapeHTML(r.id)}">${escapeHTML(r.id)} · ${escapeHTML(ruleNames[r.rule_id] || r.rule_id)}</button>`).join('') || '<p class="detail-note">No related reactions in this network.</p>'}</div><p class="detail-note">These atom-map numbers belong to the species representative. Inspect a reaction to see its single-step mapping.</p></div>`;
+    $('details').innerHTML = `<div class="detail-content"><span class="detail-kicker">SPECIES · ${escapeHTML(s.id)}</span><h3>${escapeHTML(s.name || s.formula)}</h3>${network.seeds.includes(id) ? '<span class="detail-tag">Seed species</span>' : ''}${network.targets.some(t => t.species_id === id) ? '<span class="detail-tag target">Target species</span>' : ''}<img class="structure-image" src="${escapeHTML(moleculeURL(s.smiles))}" alt="${escapeHTML(s.smiles)}"><label class="map-toggle"><input id="species-map" type="checkbox">Show species atom-map numbers</label><dl><dt>SMILES</dt><dd><code>${escapeHTML(s.smiles)}</code></dd><dt>Formula / minimum depth</dt><dd>${escapeHTML(s.formula)} · ${s.depth == null ? 'Unknown' : 'Depth '+s.depth}</dd><dt>Phase / site</dt><dd>${escapeHTML(s.phase)} / ${escapeHTML(s.site || '—')}</dd></dl><button id="analyze-species" type="button" class="secondary">Analyze formation</button><div class="detail-label"><h4>Related reactions</h4><span class="optional">${related.length} reactions</span></div><div class="related-list">${related.map(r => `<button type="button" data-related="${escapeHTML(r.id)}">${escapeHTML(r.id)} · ${escapeHTML(ruleNames[r.rule_id] || r.rule_id)}</button>`).join('') || '<p class="detail-note">No related reactions in this network.</p>'}</div><p class="detail-note">These atom-map numbers belong to the species representative. Inspect a reaction to see its single-step mapping.</p></div>`;
+    $('analyze-species').disabled = busy;
+    $('analyze-species').onclick = () => { $('pathway-target').value = id; $('pathway-settings').requestSubmit(); };
     $('species-map').onchange = event => { $('details').querySelector('.structure-image').src = moleculeURL(event.target.checked ? s.mapped_smiles : s.smiles,event.target.checked); };
     $('details').querySelectorAll('[data-related]').forEach(button => { button.onclick = () => selectNode(button.dataset.related); });
   } else if (reactionsById.has(id)) showReaction(reactionsById.get(id));
@@ -245,12 +264,14 @@ async function pollStatus() {
   polling = true;
   try {
     const state = await api('/api/status');
-    const running = ['running','stopping'].includes(state.status);
+    const running = ['running','analyzing','stopping'].includes(state.status);
     if (running !== busy) setBusy(running);
     $('stop').disabled = state.status === 'stopping';
     $('stop').textContent = state.status === 'stopping' ? 'Stopping…' : 'Stop';
+    $('graph-busy').querySelector('strong').textContent = state.status === 'analyzing' ? 'Analyzing formation pathways' : 'Generating your reaction network';
+    $('graph-busy').querySelector('p').textContent = state.status === 'analyzing' ? 'You can stop the search and keep the pathways already found.' : 'Statistics update during the run. The graph appears when it finishes.';
     const s = state.summary;
-    $('status-text').textContent = state.status === 'running' ? 'Generating' : state.status === 'stopping' ? 'Waiting for the current calculation' : state.status === 'error' ? 'Generation failed' : state.status === 'finished' ? (reasons[s.termination] || s.termination) : 'Ready';
+    $('status-text').textContent = state.status === 'analyzing' ? 'Analyzing pathways' : state.status === 'running' ? 'Generating' : state.status === 'stopping' ? 'Waiting for the current calculation' : state.status === 'error' ? 'Calculation failed' : state.status === 'finished' ? (state.analysis_termination ? ({exhausted:'Pathway analysis complete',max_pathways:'Pathway limit reached',user_stopped:'Pathway analysis stopped'}[state.analysis_termination]) : (reasons[s.termination] || s.termination)) : 'Ready';
     $('status-dot').className = running ? 'running' : state.status === 'error' ? 'error' : '';
     for (const [id,key] of [['stat-species','species'],['stat-reactions','reactions'],['stat-depth','depth_reached']]) $(id).textContent = s[key] ?? '—';
     $('stat-targets').textContent = s.targets_total ? `${s.targets_found}/${s.targets_total}` : '—';
@@ -262,13 +283,79 @@ async function pollStatus() {
       if (s.missing_targets?.length) message(`Run finished with ${s.missing_targets.length} target(s) still missing. Adjust the depth, search limits or rules and run again.`);
     } else if (state.status === 'error' && state.revision !== loadedRevision) {
       loadedRevision = state.revision;
-      message(state.error || 'Generation failed');
+      message(state.error || 'Calculation failed');
       $('empty-state').hidden = Boolean(network);
       $('graph-busy').hidden = true;
     }
   } catch (error) { message(`Cannot connect to the local service: ${error.message}`); }
   finally { polling = false; }
 }
+
+async function startPathwayAnalysis(event) {
+  event.preventDefault();
+  if (busy || !$('pathway-settings').reportValidity()) return;
+  const request = {target:$('pathway-target').value,max_reactions:Number($('pathway-max-reactions').value),max_pathways:Number($('pathway-max-count').value)};
+  message();
+  setBusy(true);
+  try {
+    await api('/api/pathways',{method:'POST',body:JSON.stringify(request)});
+    loadedRevision = -1;
+    await pollStatus();
+  } catch (error) { setBusy(false); message(error.message); }
+}
+
+function renderPathways() {
+  $('pathway-panel').hidden = false;
+  const preferred = analysis?.target || network.targets.find(t => t.species_id)?.species_id;
+  $('pathway-target').replaceChildren(...network.species.map(s => new Option(`${s.name || s.smiles} · ${s.id} · ${s.phase}${s.site ? ' / '+s.site : ''}`,s.id)));
+  $('pathway-target').value = preferred || network.species.find(s => !network.seeds.includes(s.id))?.id || network.seeds[0];
+  $('pathway-results').hidden = !analysis;
+  $('pathway-steps').replaceChildren();
+  if (!analysis) return;
+  $('pathway-max-reactions').value = analysis.max_reactions;
+  $('pathway-max-count').value = analysis.max_pathways;
+  const target = speciesById.get(analysis.target);
+  $('pathway-summary').textContent = `${analysis.pathways.length} pathway(s) to ${target.name || target.smiles} · up to ${analysis.max_reactions} reactions per route.`;
+  const notices = [];
+  if (!analysis.network_search_complete) notices.push(`Network search ended early (${reasons[analysis.network_termination] || analysis.network_termination}); alternative routes may be missing.`);
+  if (analysis.termination === 'max_pathways') notices.push('Pathway limit reached. Enumeration is not confirmed complete; results are not ranked.');
+  else if (analysis.termination === 'user_stopped') notices.push('Analysis stopped. The pathways found so far are retained.');
+  else notices.push('Enumeration complete within this stored network and reaction-count limit.');
+  if (!analysis.pathways.length) notices.push('No route found within these limits.');
+  $('pathway-warning').textContent = notices.join(' ');
+  $('pathway-view').replaceChildren(new Option('Full network','network'),new Option('Union of found pathways','all'),...analysis.pathways.map((p,i) => new Option(`Pathway ${i+1} · ${p.reactions.length} reactions`,String(i))));
+  $('pathway-view').value = 'all';
+  showPathway();
+}
+
+function showPathway() {
+  const view = $('pathway-view').value;
+  focusId = null;
+  $('search').value = '';
+  $('pathway-steps').replaceChildren();
+  const chosen = view === 'network' ? [] : view === 'all' ? analysis.pathways : [analysis.pathways[Number(view)]];
+  pathwayReactionIds = view === 'network' ? null : new Set(chosen.flatMap(p => p.reactions));
+  if (view !== 'network' && view !== 'all') {
+    const path = chosen[0];
+    const side = terms => terms.map(([sid,n]) => `${n > 1 ? n+' ' : ''}${speciesById.get(sid).name || speciesById.get(sid).smiles}`).join(' + ');
+    for (const rid of path.reactions) {
+      const r = reactionsById.get(rid);
+      const item = document.createElement('li');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = `${rid}: ${side(r.reactants)} → ${side(r.products)}`;
+      button.onclick = () => selectNode(rid);
+      item.append(button);
+      $('pathway-steps').append(item);
+    }
+    if (!path.reactions.length) $('pathway-steps').textContent = 'The target is already a seed species; no reaction is required.';
+  }
+  renderGraph();
+}
+
+$('pathway-settings').addEventListener('submit',startPathwayAnalysis);
+$('pathway-view').onchange = showPathway;
+$('export-pathways').onclick = () => { window.location.href = '/api/export/pathways'; };
 
 $('settings').addEventListener('submit',startGeneration);
 $('run-example').onclick = () => $('settings').requestSubmit();
@@ -279,7 +366,7 @@ $('stop').onclick = async () => { try { await api('/api/stop',{method:'POST'}); 
 $('search').addEventListener('input',searchGraph);
 $('depth-filter').onchange = renderGraph;
 $('neighbors').onclick = () => { focusId = focusId ? null : selectedId; renderGraph(); };
-$('show-all').onclick = () => { focusId = null; $('depth-filter').value = 'all'; $('search').value = ''; renderGraph(); };
+$('show-all').onclick = () => { pathwayReactionIds = null; $('pathway-view').value = 'network'; $('pathway-steps').replaceChildren(); focusId = null; $('depth-filter').value = 'all'; $('search').value = ''; renderGraph(); };
 $('zoom-in').onclick = () => cy.zoom({level:Math.min(cy.zoom()*1.25,2.5),renderedPosition:{x:cy.width()/2,y:cy.height()/2}});
 $('zoom-out').onclick = () => cy.zoom({level:Math.max(cy.zoom()/1.25,.12),renderedPosition:{x:cy.width()/2,y:cy.height()/2}});
 $('fit').onclick = () => cy.fit(cy.elements(),65);

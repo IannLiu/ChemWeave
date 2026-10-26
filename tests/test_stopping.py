@@ -175,3 +175,16 @@ def test_progress_and_cooperative_stop_preserve_completed_reaction():
     assert len(net.species) == 3
     assert net.reactions[0].channels[0]['match_count'] == 24
     assert Network.from_dict(net.to_dict()).to_dict() == net.to_dict()
+
+
+def test_target_recording_can_continue_after_discovery():
+    config = GenerationConfig(max_carbon=6, max_depth=4, stop_when_targets_found=False)
+    generator = Generator(load_rules(), config)
+    seeds = [Species.from_smiles('CCC')]
+    reference = generator.generate(seeds)
+    net = generator.generate(seeds, targets=[Species.from_smiles('C=C'), seeds[0]])
+    assert net.termination == 'max_depth'
+    assert net.summary()['targets_found'] == 2
+    assert net.reactions == reference.reactions
+    assert net.species.keys() == reference.species.keys()
+    assert Network.from_dict(net.to_dict()).config['stop_when_targets_found'] is False

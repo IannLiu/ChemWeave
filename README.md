@@ -35,7 +35,7 @@ python -m pip install -e ".[web]"
 python -m chemweave web
 ```
 
-After installation, `chemweave web` is an equivalent command when that environment is active. Keep the terminal open while using the interface. The browser opens at `http://127.0.0.1:8765`; if it does not open automatically, enter this address manually. The interface uses English labels. Add seed SMILES and optional names, select rules, set the carbon/depth limits, and click **Generate**. Optional target rows stop generation once all specified species appear. Expand each species row to set its phase and site.
+After installation, `chemweave web` is an equivalent command when that environment is active. Keep the terminal open while using the interface. The browser opens at `http://127.0.0.1:8765`; if it does not open automatically, enter this address manually. The interface uses English labels. Add seed SMILES and optional names, select rules, set the carbon/depth limits, and click **Generate**. Optional target rows track experimental products. **Stop when all targets are found** is enabled by default; turn it off to keep searching for alternative formation routes. Expand each species row to set its phase and site.
 
 The center panel displays species structures and separate reaction nodes with stoichiometric coefficients. Click a species or reaction to inspect its details, switch mapping channels, or display the atom-map numbers actually stored in that reaction. Search, depth filtering, and neighborhood views help explore the graph. Networks above 80 species initially display up to depth 2; the depth selector can show the remaining layers. Filtering retains complete visible reactions, including every reactant and coproduct. Statistics update while generation runs; the graph is drawn after completion.
 
@@ -227,6 +227,46 @@ max_depth = 4
 `examples/target_species.toml` contains this configuration with labels and size budgets. The two conditions can be combined: stop at the depth boundary, or earlier when all targets appear. The summary reports `depth_reached`, `targets_total`, `targets_found`, and `missing_targets`. Each target in `network.targets` has its discovered `species_id`, or `None` when missing.
 
 Target stopping saves the complete accepted reaction, all its coproducts, and the channel mapping that satisfied the condition, then returns immediately. Unvisited matches, channels, and alternative pathways are not enumerated, so match counters can be incomplete. The resulting partial network depends on seed/rule enumeration order and does not establish that every shortest pathway has been collected.
+
+## Formation pathways
+
+After generating or opening a network, use **Formation pathways** in the left panel. Select a product, set **Max reactions per route** and **Max pathways**, then click **Analyze formation**. You can also start from a species inspector's **Analyze formation** button. Turn off **Stop when all targets are found** before generating the network if you want to collect alternative routes. Analysis uses the stored network; it does not expand a previously truncated run.
+
+Choose one pathway to see its reactions in an executable order, or **Union of found pathways** to compare routes. Each reaction keeps all reactants, coproducts, coefficients and mapping channels. The union is a comparison view, not a new executable route. Pathway views bypass the network depth display filter so complete reactions remain visible; **Reset view** returns to the full network. **Stop** also works during analysis and retains routes already found. **Save project** includes the latest analysis, and **Export pathways JSON** saves the analysis with the underlying network.
+
+```python
+from chemweave import GenerationConfig, Generator, Species, find_pathways, load_rules
+
+network = Generator(load_rules(), GenerationConfig(
+    max_carbon=6, max_depth=4, stop_when_targets_found=False,
+)).generate([Species.from_smiles("CCC")], targets=[Species.from_smiles("C=C")])
+
+target_id = network.targets[0]["species_id"]
+if target_id is not None:
+    result = find_pathways(network, target_id, max_reactions=8, max_pathways=100)
+    for route in result["pathways"]:
+        print(route["reactions"])  # Reaction IDs in one valid execution order
+    print(result["termination"], result["network_search_complete"])
+```
+
+This example yields two four-reaction routes to ethene with the bundled rules. `examples/formation_pathways.toml` generates the same network from the CLI. To analyze a saved network, replace `S00008` below with the target's ID in that file:
+
+```bash
+python -m chemweave generate --config examples/formation_pathways.toml --output results
+python -m chemweave pathways --network results/network.json --target S00008 --max-reactions 8 --max-pathways 100 --output results/pathways.json
+```
+
+`stop_when_targets_found = false` belongs in the TOML `[generation]` section. Omitting it preserves the existing early-stop behavior. The `pathways` command exits with code 2 if enumeration hits its pathway cap or the stored network was stopped early; it still writes the result. An exhaustive analysis with no matching routes exits 0 and reports an empty list.
+
+The analyzer first traces candidate producers backward, then enumerates seed-supported reaction sets forward. All reactants of a reaction must be available. A route is retained only if removing any one reaction makes the target unreachable within that route. This removes unnecessary preparation branches and product-recycling detours, while retaining longer alternative routes. Shared preparation reactions count once, and coproducts may support other branches. A structural cycle is not automatically discarded when its steps produce necessary coproducts; what is excluded is circular dependence on material that has no seed-supported source. Independent execution orders of the same reaction set count as one route. A target already among the seeds has one zero-reaction route.
+
+Limits and interpretation:
+
+- `max_reactions` counts distinct reactions across **all** branches. For `A → B`, `A → C`, `B + C → P`, the route contains three reactions although its dependency depth is two. The stored network's minimum depths do not bound every alternative route's length.
+- Results describe qualitative species availability, not finite inventories, repeated reaction events, net yields or kinetics. For example, self-coupling requires a source of that species but does not check that two molecules remain in an inventory. Stoichiometric coefficients are retained for inspection.
+- Mapping channels stay on the original reaction records. Routes are not expanded into channel combinations or assigned a continuous atom map across steps.
+- `termination="exhausted"` means enumeration finished within the **stored network and the chosen route-size bound**. `max_pathways` means the cap was reached and completeness was not confirmed; `user_stopped` means cancellation. Traversal follows stored reaction order, not a shortest-path or kinetic ranking.
+- `network_search_complete` is true only for network termination `exhausted` or `max_depth`, relative to its rules and configured bounds. Target stopping, species/reaction budgets, and user cancellation can omit alternative routes even when pathway enumeration itself finishes. The web interface reports these two sources of incompleteness separately.
 
 ## Command line and outputs
 

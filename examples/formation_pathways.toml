@@ -1,0 +1,15 @@
+# Track ethene while continuing to collect alternative formation routes.
+[[seeds]]
+smiles = "CCC"
+name = "Propane"
+
+[[targets]]
+smiles = "C=C"
+name = "Ethene"
+
+[generation]
+max_carbon = 6
+max_depth = 4
+max_species = 200
+max_reactions = 1000
+stop_when_targets_found = false

@@ -23,6 +23,7 @@ import uvicorn
 from . import __version__
 from .generator import GenerationConfig, Generator
 from .models import Network, Species
+from .pathways import find_pathways
 from .rules import ReactionRule, load_rules
 
 
@@ -40,6 +41,12 @@ class RunInput(BaseModel):
     config: GenerationConfig = Field(default_factory=lambda: GenerationConfig(max_carbon=6, max_depth=4))
 
 
+class PathwayInput(BaseModel):
+    target: str
+    max_reactions: int = Field(default=8, ge=0)
+    max_pathways: int = Field(default=100, ge=1)
+
+
 @dataclass
 class Workspace:
     lock: Lock = field(default_factory=Lock)
@@ -49,6 +56,7 @@ class Workspace:
     network: Network | None = None
     request: dict | None = None
     error: str | None = None
+    analysis: dict | None = None
     started: float = 0
     elapsed: float = 0
     revision: int = 0
@@ -124,11 +132,12 @@ def create_app(browser_url=None):
         except (ValueError, TypeError) as error:
             raise HTTPException(422, str(error)) from error
         with workspace.lock:
-            if workspace.status in {"running", "stopping"}:
-                raise HTTPException(409, "A generation is already running")
+            if workspace.status in {"running", "analyzing", "stopping"}:
+                raise HTTPException(409, "A calculation is already running")
             workspace.cancel.clear()
             workspace.status = "running"
             workspace.network = None
+            workspace.analysis = None
             workspace.summary = {}
             workspace.error = None
             workspace.started = monotonic()
@@ -174,15 +183,16 @@ def create_app(browser_url=None):
     @app.get("/api/status")
     def status():
         with workspace.lock:
-            elapsed = monotonic() - workspace.started if workspace.status in {"running", "stopping"} else workspace.elapsed
+            elapsed = monotonic() - workspace.started if workspace.status in {"running", "analyzing", "stopping"} else workspace.elapsed
             return {"status": workspace.status, "summary": workspace.summary,
                     "error": workspace.error, "elapsed": round(elapsed, 2),
-                    "revision": workspace.revision}
+                    "revision": workspace.revision,
+                    "analysis_termination": workspace.analysis["termination"] if workspace.analysis else None}
 
     @app.post("/api/stop")
     def stop():
         with workspace.lock:
-            if workspace.status == "running":
+            if workspace.status in {"running", "analyzing"}:
                 workspace.status = "stopping"
                 workspace.cancel.set()
             return {"status": workspace.status}
@@ -192,7 +202,46 @@ def create_app(browser_url=None):
         with workspace.lock:
             if workspace.network is None:
                 raise HTTPException(409, "No completed network is available")
-            return {"network": workspace.network.to_dict(), "request": workspace.request}
+            return {"network": workspace.network.to_dict(), "request": workspace.request,
+                    "analysis": workspace.analysis}
+
+    @app.post("/api/pathways", status_code=202)
+    def analyze(request: PathwayInput):
+        with workspace.lock:
+            if workspace.status in {"running", "analyzing", "stopping"}:
+                raise HTTPException(409, "A calculation is already running")
+            network = workspace.network
+            if network is None:
+                raise HTTPException(409, "Generate or open a network first")
+            if request.target not in network.species:
+                raise HTTPException(422, "Select a target species present in the network")
+            workspace.cancel.clear()
+            workspace.analysis = None
+            workspace.status = "analyzing"
+            workspace.error = None
+            workspace.started = monotonic()
+            workspace.elapsed = 0
+            workspace.revision += 1
+
+        def work():
+            try:
+                result = find_pathways(network, **request.model_dump(),
+                                       stop_requested=workspace.cancel.is_set)
+                with workspace.lock:
+                    workspace.analysis = result
+                    workspace.status = "finished"
+                    workspace.elapsed = monotonic() - workspace.started
+                    workspace.revision += 1
+            except Exception as error:
+                with workspace.lock:
+                    workspace.error = str(error)
+                    workspace.status = "error"
+                    workspace.elapsed = monotonic() - workspace.started
+                    workspace.revision += 1
+
+        workspace.worker = Thread(target=work, daemon=True, name="chemweave-pathways")
+        workspace.worker.start()
+        return {"status": "analyzing"}
 
     @app.post("/api/open")
     def open_project(data: dict):
@@ -218,23 +267,25 @@ def create_app(browser_url=None):
         except (ValueError, TypeError, KeyError) as error:
             raise HTTPException(422, str(error)) from error
         with workspace.lock:
-            if workspace.status in {"running", "stopping"}:
-                raise HTTPException(409, "Stop the current generation before opening a file")
+            if workspace.status in {"running", "analyzing", "stopping"}:
+                raise HTTPException(409, "Stop the current calculation before opening a file")
             workspace.network = network
+            workspace.analysis = data.get("analysis")
             workspace.request = request
             workspace.status = "finished"
             workspace.error = None
             workspace.summary = network.summary()
             workspace.elapsed = 0
             workspace.revision += 1
-        return {"network": network.to_dict(), "request": request}
+        return {"network": network.to_dict(), "request": request, "analysis": workspace.analysis}
 
     @app.post("/api/new")
     def new_project():
         with workspace.lock:
-            if workspace.status in {"running", "stopping"}:
-                raise HTTPException(409, "Stop the current generation before starting a new project")
+            if workspace.status in {"running", "analyzing", "stopping"}:
+                raise HTTPException(409, "Stop the current calculation before starting a new project")
             workspace.network = None
+            workspace.analysis = None
             workspace.request = None
             workspace.summary = {}
             workspace.error = None
@@ -246,13 +297,17 @@ def create_app(browser_url=None):
     @app.get("/api/export/{format}")
     def export(format: str):
         with workspace.lock:
-            network, request = workspace.network, workspace.request
+            network, request, analysis = workspace.network, workspace.request, workspace.analysis
         if network is None:
             raise HTTPException(409, "No completed network is available")
-        if format in {"project", "json"}:
+        if format in {"project", "json", "pathways"}:
             data = network.to_dict()
             if format == "project":
-                data = {"chemweave_project": 1, "request": request, "network": data}
+                data = {"chemweave_project": 1, "request": request, "network": data, "analysis": analysis}
+            elif format == "pathways":
+                if analysis is None:
+                    raise HTTPException(409, "Analyze formation pathways first")
+                data = {"analysis": analysis, "network": data}
             body = json.dumps(data, ensure_ascii=False, indent=2).encode()
             return Response(body, media_type="application/json", headers={
                 "Content-Disposition": f'attachment; filename="chemweave-{format}.json"',

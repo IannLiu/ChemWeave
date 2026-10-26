@@ -15,6 +15,7 @@ class GenerationConfig:
     max_species: int = 1000
     max_reactions: int = 5000
     max_depth: int | None = None
+    stop_when_targets_found: bool = True
 
 
 class Generator:
@@ -36,7 +37,8 @@ class Generator:
         template slots need not be interchangeable. Seeds have depth zero;
         products have depth one greater than the deepest reactant. FIFO order
         makes the first discovery of each species its minimum reachable depth.
-        Targets are Species objects; identity includes phase and site.
+        Targets are Species objects; identity includes phase and site. Set
+        stop_when_targets_found=False to record them and continue growing.
         Optional callbacks report completed applications and request a stop
         between candidates, preserving complete accepted reaction records.
         """
@@ -75,7 +77,7 @@ class Generator:
             })
         if progress is not None:
             progress(network)
-        if target_records and not remaining_targets:
+        if self.config.stop_when_targets_found and target_records and not remaining_targets:
             network.termination = "targets_reached"
             return network
 
@@ -173,7 +175,7 @@ class Generator:
                                 }
                                 reaction.channels.append(channel)
                                 channel_index[channel_key] = channel
-                            if target_records and not remaining_targets:
+                            if self.config.stop_when_targets_found and target_records and not remaining_targets:
                                 network.termination = "targets_reached"
                                 network.stats["rejected"] = dict(rejected)
                                 return network

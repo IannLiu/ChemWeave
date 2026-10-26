@@ -26,7 +26,7 @@ def finish(client):
     deadline = monotonic() + 10
     while monotonic() < deadline:
         state = client.get('/api/status').json()
-        if state['status'] not in {'running', 'stopping'}:
+        if state['status'] not in {'running', 'analyzing', 'stopping'}:
             return state
         sleep(.02)
     pytest.fail('Background generation did not finish')
@@ -129,3 +129,62 @@ def test_stop_keeps_a_consistent_network_and_prevents_overlapping_jobs(client, m
     assert len(saved['species']) == 1
     assert saved['reactions'] == []
     assert client.get('/api/export/project').status_code == 200
+
+
+def test_pathways_continue_generation_export_and_restore(client):
+    request = {'seeds': [{'smiles': 'CCC'}], 'targets': [{'smiles': 'C=C'}],
+               'config': {'max_carbon': 6, 'max_depth': 4, 'stop_when_targets_found': False}}
+    assert client.post('/api/run', json=request).status_code == 202
+    assert finish(client)['summary']['termination'] == 'max_depth'
+    payload = client.get('/api/network').json()
+    target = payload['network']['targets'][0]['species_id']
+    assert client.post('/api/pathways', json={'target': target}).status_code == 202
+    assert finish(client)['analysis_termination'] == 'exhausted'
+    result = client.get('/api/network').json()['analysis']
+    assert len(result['pathways']) == 2
+    assert all(len(p['reactions']) == 4 for p in result['pathways'])
+    report = client.get('/api/export/pathways').json()
+    assert report['analysis'] == result
+    assert report['network'] == payload['network']
+    project = client.get('/api/export/project').json()
+    assert project['request']['config']['stop_when_targets_found'] is False
+    assert client.post('/api/new').status_code == 200
+    assert client.post('/api/open', json=project).json()['analysis'] == result
+    assert client.post('/api/pathways', json={'target': target, 'max_pathways': 1}).status_code == 202
+    assert finish(client)['analysis_termination'] == 'max_pathways'
+    assert client.post('/api/open', json=payload['network']).json()['analysis'] is None
+    assert client.post('/api/pathways', json={'target': 'not-present'}).status_code == 422
+    assert client.post('/api/pathways', json={'target': target, 'max_reactions': -1}).status_code == 422
+
+
+def test_pathway_analysis_can_be_stopped_without_discarding_network(client, monkeypatch):
+    from chemweave import web
+    request = {'seeds': [{'smiles': 'CCC'}], 'config': {'max_depth': 1}}
+    assert client.post('/api/run', json=request).status_code == 202
+    finish(client)
+    before = client.get('/api/network').json()['network']
+    target = before['species'][-1]['id']
+    entered, release = Event(), Event()
+    original = web.find_pathways
+
+    def wait_for_stop(*args, **kwargs):
+        entered.set()
+        assert release.wait(5)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(web, 'find_pathways', wait_for_stop)
+    assert client.post('/api/pathways', json={'target': target}).status_code == 202
+    assert entered.wait(5)
+    try:
+        assert client.get('/api/status').json()['status'] == 'analyzing'
+        assert client.post('/api/pathways', json={'target': target}).status_code == 409
+        assert client.post('/api/run', json=request).status_code == 409
+        assert client.post('/api/open', json=before).status_code == 409
+        assert client.post('/api/new').status_code == 409
+        assert client.post('/api/stop').json()['status'] == 'stopping'
+    finally:
+        release.set()
+    assert finish(client)['analysis_termination'] == 'user_stopped'
+    after = client.get('/api/network').json()
+    assert after['network'] == before
+    assert after['analysis']['pathways'] == []

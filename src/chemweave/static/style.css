@@ -1391,3 +1391,50 @@ dialog>div {
   }
 }
 
+
+/* Pathway controls share the configuration column and preserve full reactions. */
+.pathway-label {
+  display:block;
+  font-size:11px;
+  margin-bottom:14px;
+}
+
+.pathway-label select {
+  display:block;
+  width:100%;
+  margin-top:8px;
+  padding:8px;
+  border:1px solid var(--line);
+  border-radius:6px;
+  background:#fff;
+}
+
+#pathway-panel fieldset {
+  padding:0;
+  border:0;
+  min-width:0;
+}
+
+#pathway-steps {
+  padding-left:20px;
+  font-size:11px;
+}
+
+#pathway-steps button {
+  text-align:left;
+  overflow-wrap:anywhere;
+  padding:6px 3px;
+  line-height:1.6;
+}
+
+#pathway-steps button:hover {
+  background:var(--canvas);
+}
+
+#pathway-warning {
+  color:#82633b;
+}
+
+#pathway-panel .input-pair {
+  align-items:end;
+}

@@ -20,9 +20,21 @@
 <section class="config-section"><div class="section-title"><h2><span>01</span> Seed species</h2><button id="add-seed" class="small-button" type="button">＋ Add</button></div><div id="seeds" class="species-inputs"></div><details class="batch-input"><summary>Paste multiple SMILES</summary><textarea id="bulk-smiles" rows="3" placeholder="One SMILES per line"></textarea><button id="add-bulk" type="button" class="small-button">Add seed species</button></details></section>
 <section class="config-section"><div class="section-title"><h2><span>02</span> Reaction rules</h2><button id="import-rules" class="small-button" type="button">Import</button></div><div class="rule-set-label"><span id="rule-set-name">Built-in demo rules</span><button id="reset-rules" type="button" class="link-button" hidden>Reset rules</button></div><div id="rules"></div></section>
 <section class="config-section"><div class="section-title"><h2><span>03</span> Growth & stopping</h2></div><div class="input-pair"><label>Max carbon count<input id="max-carbon" type="number" min="1" step="1" value="6" required></label><label>Max depth<input id="max-depth" type="number" min="0" step="1" value="4" placeholder="No limit"></label></div><p class="field-hint">Seeds have depth 0. Leave depth blank for no limit.</p>
-<div class="section-title target-heading"><h3>Target species <span class="optional">Optional</span></h3><button id="add-target" class="small-button" type="button">＋ Add</button></div><p id="target-hint" class="field-hint">Stop early when all target species have appeared.</p><div id="targets" class="species-inputs"></div>
+<div class="section-title target-heading"><h3>Target species <span class="optional">Optional</span></h3><button id="add-target" class="small-button" type="button">＋ Add</button></div><p id="target-hint" class="field-hint">Track experimental products. Turn off early stopping to search for alternative routes.</p><div id="targets" class="species-inputs"></div>
+<label class="map-toggle"><input id="stop-on-targets" type="checkbox" checked>Stop when all targets are found</label>
 <details class="advanced"><summary>Advanced settings</summary><div class="input-pair"><label>Max species<input id="max-species" type="number" min="1" value="200" required></label><label>Max reactions<input id="max-reactions" type="number" min="1" value="1000" required></label></div></details></section>
 </fieldset></form>
+<section id="pathway-panel" class="config-section" hidden>
+<div class="section-title"><h2><span>04</span> Formation pathways</h2></div>
+<form id="pathway-settings"><fieldset id="pathway-fields">
+<label class="pathway-label">Product to analyze<select id="pathway-target" required aria-label="Product to analyze"></select></label>
+<div class="input-pair"><label>Max reactions per route<input id="pathway-max-reactions" type="number" min="0" step="1" value="8" required></label><label>Max pathways<input id="pathway-max-count" type="number" min="1" step="1" value="100" required></label></div>
+<p class="field-hint">Counts all branches, not just network depth. Routes require every reactant and omit unnecessary reactions.</p>
+<button id="analyze-pathways" class="secondary" type="submit">Analyze formation</button>
+</fieldset></form>
+<div id="pathway-results" hidden aria-live="polite"><p id="pathway-summary" class="field-hint"></p><p id="pathway-warning" class="field-hint"></p><label class="pathway-label">Graph view<select id="pathway-view" aria-label="Pathway view"></select></label><ol id="pathway-steps"></ol><button id="export-pathways" class="small-button" type="button">Export pathways JSON</button></div>
+<p class="field-hint">Structural availability only; no feed quantities or kinetic ranking. Mapping channels remain in reaction details.</p>
+</section>
 <div class="configuration-footer"><span class="mini-mark">◇</span><p>Rules define the search space. Built-in rules demonstrate structural transformations.</p></div>
 </aside>
 <section class="network-panel" aria-label="Reaction network">
