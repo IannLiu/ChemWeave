@@ -28,7 +28,7 @@ class Generator:
         if self.config.max_depth is not None and self.config.max_depth < 0:
             raise ValueError("max_depth must be nonnegative")
 
-    def generate(self, seeds, *, targets=()):
+    def generate(self, seeds, *, targets=(), progress=None, stop_requested=None):
         """Grow from seeds until exhausted, a limit, or all target species appear.
 
         Each species is matched against each template slot once. Only newly
@@ -37,6 +37,8 @@ class Generator:
         products have depth one greater than the deepest reactant. FIFO order
         makes the first discovery of each species its minimum reachable depth.
         Targets are Species objects; identity includes phase and site.
+        Optional callbacks report completed applications and request a stop
+        between candidates, preserving complete accepted reaction records.
         """
         network = Network(
             rules=[rule.to_dict() for rule in self.rules], config=asdict(self.config),
@@ -71,6 +73,8 @@ class Generator:
                 "species_id": identities[species.key], "mapped_smiles": species.mapped_smiles,
                 "input_maps": species.input_maps, "name": species.name,
             })
+        if progress is not None:
+            progress(network)
         if target_records and not remaining_targets:
             network.termination = "targets_reached"
             return network
@@ -81,6 +85,9 @@ class Generator:
         channel_index = {}
         rejected = Counter()
         while pending:
+            if stop_requested is not None and stop_requested():
+                network.termination = "user_stopped"
+                break
             sid = pending.popleft()
             depth = network.species_depths[sid]
             # All remaining species are at least this deep. Boundary species
@@ -96,6 +103,10 @@ class Generator:
                     pools[ri][slot].append(sid)
                     choices = [([sid] if j == slot else pool) for j, pool in enumerate(pools[ri])]
                     for reactant_ids in product(*choices):
+                        if stop_requested is not None and stop_requested():
+                            network.termination = "user_stopped"
+                            network.stats["rejected"] = dict(rejected)
+                            return network
                         application = (rule.id, reactant_ids)
                         if application in applications:
                             continue
@@ -103,6 +114,10 @@ class Generator:
                         network.stats["applications"] += 1
                         reactants = tuple(network.species[rid] for rid in reactant_ids)
                         for products, provenance in rule.apply(reactants, rejected):
+                            if stop_requested is not None and stop_requested():
+                                network.termination = "user_stopped"
+                                network.stats["rejected"] = dict(rejected)
+                                return network
                             if any(s.carbon_count > self.config.max_carbon for s in products):
                                 rejected["max_carbon"] += 1
                                 continue
@@ -162,5 +177,8 @@ class Generator:
                                 network.termination = "targets_reached"
                                 network.stats["rejected"] = dict(rejected)
                                 return network
+                        if progress is not None:
+                            network.stats["rejected"] = dict(rejected)
+                            progress(network)
         network.stats["rejected"] = dict(rejected)
         return network

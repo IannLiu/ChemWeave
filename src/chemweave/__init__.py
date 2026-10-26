@@ -4,5 +4,5 @@ from .generator import GenerationConfig, Generator
 from .models import Network, Reaction, Species
 from .rules import ReactionRule, load_rules
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 __all__ = ["Species", "Reaction", "ReactionRule", "Network", "GenerationConfig", "Generator", "load_rules"]

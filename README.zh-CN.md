@@ -19,12 +19,59 @@ python -m pytest -q
 
 pytest 作为可选开发依赖声明在 `.[test]` 中。需要一起安装时，可运行 `python -m pip install -e ".[test]"`；已有 pytest 的环境可以使用上面的命令。
 
-不安装时也可以在项目目录直接运行：
+在 macOS/Linux 中，不安装时也可以在项目目录直接运行：
 
 ```bash
 PYTHONPATH=src python -m chemweave generate \
   --config examples/propane.toml --output results/propane
 ```
+
+## 网页界面
+
+Windows、macOS 和 Linux 使用相同的 Python 启动入口。在包含 `pyproject.toml` 的项目目录打开终端，使用 Python 3.11 或更新版本的环境。首次安装网页可选依赖，随后启动本地工作台：
+
+```bash
+python -m pip install -e ".[web]"
+python -m chemweave web
+```
+
+安装完成且对应环境已激活时，也可以使用等价命令 `chemweave web`。使用网页期间保持终端打开。浏览器会自动打开 `http://127.0.0.1:8765`；如果没有自动打开，可手动输入该地址。网页界面使用英文。输入初始物种 SMILES 和可选名称，勾选规则，设置碳数、深度后点击“Generate”（生成）。可添加目标物种，全部出现后提前停止；展开各物种的“Phase and site”（相态与位点）可以设置对应状态。
+
+中间图使用分子结构节点和独立的反应节点，边上显示非 1 的计量系数。点击节点可以查看物种或反应详情、切换映射通道、显示该反应实际保存的 atom-map 编号。可以搜索、按深度筛选或查看选中节点附近。超过 80 个物种时，默认显示到第 2 层，可通过深度选项展开。筛选后只显示包含全部反应物和共生成物的完整反应。运行期间更新统计信息，结束后绘制网络。
+
+“Stop”（停止）在候选反应之间请求停止；当前正在执行的 RDKit 底层匹配调用需要返回后，停止请求才能生效。已接受的反应记录保持完整，结果标记为 `termination="user_stopped"`，可以继续保存；匹配计数和替代路径可能尚未枚举完整。
+
+“Save project”（保存项目）下载包含输入、所选规则、设置和网络的 JSON 文件。“Open”（打开）支持项目文件及现有 `network.json`，包含受支持的旧版格式。“Export”（导出）支持网络 JSON、CSV 表格及 DOT 的 ZIP 包，或当前网络视图的 PNG 图片。下载位置遵循浏览器的正常设置。
+
+每个本地服务在内存中维护一个工作区，多个浏览器标签页共享它。刷新会恢复当前工作区；保存项目后可以跨服务重启恢复。“New”（新建）在确认后清空工作区。服务只监听本机回环地址；可在终端按 Ctrl+C 关闭。
+
+如果希望使用独立环境，在项目目录中创建一次：
+
+```text
+python -m venv .venv-web
+```
+
+然后直接用该环境的 Python 安装和启动，无需先执行环境激活命令。
+
+**Windows（PowerShell 或命令提示符）：**
+
+```text
+.\.venv-web\Scripts\python.exe -m pip install -e ".[web]"
+.\.venv-web\Scripts\python.exe -m chemweave web
+```
+
+**macOS / Linux：**
+
+```bash
+.venv-web/bin/python -m pip install -e ".[web]"
+.venv-web/bin/python -m chemweave web
+```
+
+以后使用时，只需运行对应环境的启动命令，不必重复创建环境和安装。如果系统中的 Python 命令是 `python3`，创建环境时使用 `python3`。已有 Conda 环境也可以直接使用本节开头的通用安装和启动命令。如果要复用创建虚拟环境时所在 Python 环境中的 RDKit 等包，可在 `venv` 命令中加入 `--system-site-packages`。
+
+需要更换端口时运行 `python -m chemweave web --port 8766`；加上 `--no-browser` 表示不自动打开浏览器。使用独立环境时，将这里的 `python` 替换为上面对应系统的 Python 路径。在终端按 Ctrl+C 可以关闭服务。
+
+后台使用 [FastAPI](https://fastapi.tiangolo.com/) 和 Uvicorn；分子 SVG 由 RDKit 绘制。[Cytoscape.js](https://js.cytoscape.org/) 3.34.4 及 MIT 许可证已随包提供，运行时不连接 CDN，不需要 Node.js 或前端构建。Python 接口和命令行生成仍可在未安装网页依赖时使用。
 
 ## Python 接口
 
@@ -211,9 +258,14 @@ DOT 导出不依赖 Graphviz；如已安装 Graphviz，可用 `dot -Tsvg results
 | `exhausted` | 所选规则和碳数范围内没有待处理组合；目标仍可能缺失 |
 | `max_depth` | 达到深度边界，包含该深度的产物 |
 | `targets_reached` | 所有目标均已出现，也可能已经包含在种子中 |
+| `user_stopped` | 调用者或网页请求停止 |
 | `max_species`、`max_reactions` | 数量预算不允许加入下一条完整反应，保存结构一致的部分网络 |
 
-网络穷尽、达到深度边界或找到全部目标时，命令行在**没有缺失目标**的前提下返回退出码 0。数量预算中止或仍缺失目标时返回 2，结果仍会保存。输入错误由 Python/RDKit 报告。
+网络穷尽、达到深度边界或找到全部目标时，命令行在**没有缺失目标**的前提下返回退出码 0。数量预算中止、用户停止或仍缺失目标时返回 2，结果仍会保存。输入错误由 Python/RDKit 报告。
+
+## Python 中的进度与用户停止
+
+`Generator.generate` 新增可选的 `progress(network)` 和 `stop_requested()` 回调。完成种子登记和每次完整的模板/反应物组合执行后报告进度；进度回调访问当前网络，应尽快返回。停止回调返回真时，生成器返回结构一致的部分网络，并标记 `termination="user_stopped"`。已有调用无需修改。`Network.to_dict()`、`Network.from_dict()` 与文件持久化共用 JSON 表示。
 
 ## 后续扩展
 

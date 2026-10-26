@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#235f56">
+<title>ChemWeave · Reaction Network Studio</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23235f56'/%3E%3Cpath d='M9 10L23 16L9 23Z' fill='none' stroke='%23dce9b3' stroke-width='2'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css"><script defer src="/static/vendor/cytoscape.min.js"></script><script defer src="/static/app.js"></script>
+</head>
+<body>
+<header class="topbar">
+<a class="brand" href="/" aria-label="ChemWeave home"><svg viewBox="0 0 36 36" aria-hidden="true"><path d="M10 9l16 9-16 9V9z"/><circle cx="10" cy="9" r="4"/><circle cx="26" cy="18" r="4"/><circle cx="10" cy="27" r="4"/></svg><span>ChemWeave<small>REACTION NETWORK STUDIO</small></span></a>
+<span class="local-badge"><i></i>Local workspace</span>
+<nav class="project-actions" aria-label="Project actions"><button id="new-project" class="text-button" type="button">New</button><button id="open-project" class="text-button" type="button">Open</button><button id="save-project" class="text-button" type="button" disabled>Save project</button><button id="stop" class="stop-button" type="button" hidden>Stop</button><button id="run" class="primary" type="submit" form="settings"><span>▶</span> Generate</button></nav>
+</header>
+<div id="message" role="alert" hidden></div>
+<main class="workspace">
+<aside class="configuration">
+<div class="panel-heading"><span class="eyebrow">CONFIGURATION</span><h1>Build your network</h1><p>Explore the transformations allowed by your rules.</p></div>
+<form id="settings"><fieldset id="configuration-fields">
+<section class="config-section"><div class="section-title"><h2><span>01</span> Seed species</h2><button id="add-seed" class="small-button" type="button">＋ Add</button></div><div id="seeds" class="species-inputs"></div><details class="batch-input"><summary>Paste multiple SMILES</summary><textarea id="bulk-smiles" rows="3" placeholder="One SMILES per line"></textarea><button id="add-bulk" type="button" class="small-button">Add seed species</button></details></section>
+<section class="config-section"><div class="section-title"><h2><span>02</span> Reaction rules</h2><button id="import-rules" class="small-button" type="button">Import</button></div><div class="rule-set-label"><span id="rule-set-name">Built-in demo rules</span><button id="reset-rules" type="button" class="link-button" hidden>Reset rules</button></div><div id="rules"></div></section>
+<section class="config-section"><div class="section-title"><h2><span>03</span> Growth & stopping</h2></div><div class="input-pair"><label>Max carbon count<input id="max-carbon" type="number" min="1" step="1" value="6" required></label><label>Max depth<input id="max-depth" type="number" min="0" step="1" value="4" placeholder="No limit"></label></div><p class="field-hint">Seeds have depth 0. Leave depth blank for no limit.</p>
+<div class="section-title target-heading"><h3>Target species <span class="optional">Optional</span></h3><button id="add-target" class="small-button" type="button">＋ Add</button></div><p id="target-hint" class="field-hint">Stop early when all target species have appeared.</p><div id="targets" class="species-inputs"></div>
+<details class="advanced"><summary>Advanced settings</summary><div class="input-pair"><label>Max species<input id="max-species" type="number" min="1" value="200" required></label><label>Max reactions<input id="max-reactions" type="number" min="1" value="1000" required></label></div></details></section>
+</fieldset></form>
+<div class="configuration-footer"><span class="mini-mark">◇</span><p>Rules define the search space. Built-in rules demonstrate structural transformations.</p></div>
+</aside>
+<section class="network-panel" aria-label="Reaction network">
+<div class="network-heading"><div><span class="eyebrow">WORKSPACE</span><h2>Reaction network <span id="network-count" class="count-badge">Not generated</span></h2></div><div class="export-actions"><select id="export-format" aria-label="Export format" disabled><option value="json">Network JSON</option><option value="csv">CSV tables (ZIP)</option><option value="png">Network PNG</option></select><button id="export" class="small-button" type="button" disabled>Export ↗</button></div></div>
+<div class="graph-toolbar"><label class="search"><span>⌕</span><input id="search" type="search" placeholder="Search name, SMILES or ID" aria-label="Search species"></label><select id="depth-filter" aria-label="Visible depth"><option value="all">All depths</option></select><button id="neighbors" class="tool-button" type="button" disabled>Neighborhood</button><button id="show-all" class="tool-button" type="button">Reset view</button></div>
+<div class="graph-container"><div id="graph" aria-label="Interactive reaction network graph"></div>
+<div id="empty-state"><div class="empty-network"><i></i><i></i><i></i><i></i><i></i><svg viewBox="0 0 200 130"><path d="M35 65h50m20 0h50M95 55L65 20m40 55l35 35"/></svg></div><span class="eyebrow">A STARTING POINT FOR DISCOVERY</span><h2>Explore what your species can become</h2><p>Add seed species and choose reaction rules.<br>Generate a network to explore molecules and their reactions.</p><button id="run-example" type="button" class="secondary">Generate network <span>→</span></button><small>Propane example loaded · Maximum depth 4</small></div>
+<div id="graph-busy" hidden><span class="spinner"></span><strong>Generating your reaction network</strong><p>Statistics update during the run. The graph appears when it finishes.</p></div>
+<div class="graph-legend"><span><i class="legend-species"></i>Species</span><span><i class="legend-reaction"></i>Reactions</span><span><i class="legend-seed"></i>Seed species</span><span><i class="legend-target"></i>Targets</span></div>
+<div class="zoom-controls"><button id="zoom-in" type="button" aria-label="Zoom in">＋</button><button id="zoom-out" type="button" aria-label="Zoom out">−</button><button id="fit" type="button" aria-label="Fit to view">⤢</button></div></div>
+<div class="graph-caption"><span id="visible-count">Drag to pan · Scroll to zoom · Click for details</span><span id="view-note"></span></div>
+</section>
+<aside class="inspector"><div class="inspector-heading"><span class="eyebrow">INSPECTOR</span><h2>Details</h2></div><div id="details"><div class="inspector-empty"><div class="inspect-icon">⌘</div><h3>Inspect each transformation</h3><p>Select a species or reaction to inspect<br>its structure, depth and atom mapping.</p><div class="inspector-guide"><span>Molecular structures and species data</span><span>Reaction rules and stoichiometry</span><span>Symmetry-distinct mapping channels</span></div></div></div></aside>
+</main>
+<footer class="statusbar" aria-live="polite"><div class="status-label"><i id="status-dot"></i><strong id="status-text">Ready</strong></div><div class="status-metrics"><span>Species <b id="stat-species">—</b></span><span>Reactions <b id="stat-reactions">—</b></span><span>Depth <b id="stat-depth">—</b></span><span>Targets <b id="stat-targets">—</b></span></div><span id="elapsed">All calculations run locally</span></footer>
+<input id="project-file" type="file" accept=".json,application/json" hidden><input id="rules-file" type="file" accept=".json,application/json" hidden>
+<dialog id="new-dialog"><h2>New network</h2><p>Your current settings and results will be replaced. Save your project first if you want to keep them.</p><div><button id="cancel-new" class="secondary" type="button">Cancel</button><button id="confirm-new" class="primary" type="button">New</button></div></dialog>
+</body></html>

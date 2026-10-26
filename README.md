@@ -19,12 +19,59 @@ python -m pytest -q
 
 pytest is declared as an optional development dependency in `.[test]`. To install it with the package, use `python -m pip install -e ".[test]"`. An environment that already has pytest can use the commands above.
 
-You can also run directly from the project directory without installing the package:
+On macOS/Linux, you can also run directly from the project directory without installing the package:
 
 ```bash
 PYTHONPATH=src python -m chemweave generate \
   --config examples/propane.toml --output results/propane
 ```
+
+## Browser interface
+
+Windows, macOS, and Linux use the same Python entry point. Open a terminal in the project directory containing `pyproject.toml`, using a Python 3.11+ environment. Install the optional web dependencies once, then launch the local workspace:
+
+```bash
+python -m pip install -e ".[web]"
+python -m chemweave web
+```
+
+After installation, `chemweave web` is an equivalent command when that environment is active. Keep the terminal open while using the interface. The browser opens at `http://127.0.0.1:8765`; if it does not open automatically, enter this address manually. The interface uses English labels. Add seed SMILES and optional names, select rules, set the carbon/depth limits, and click **Generate**. Optional target rows stop generation once all specified species appear. Expand each species row to set its phase and site.
+
+The center panel displays species structures and separate reaction nodes with stoichiometric coefficients. Click a species or reaction to inspect its details, switch mapping channels, or display the atom-map numbers actually stored in that reaction. Search, depth filtering, and neighborhood views help explore the graph. Networks above 80 species initially display up to depth 2; the depth selector can show the remaining layers. Filtering retains complete visible reactions, including every reactant and coproduct. Statistics update while generation runs; the graph is drawn after completion.
+
+**Stop** requests a cooperative stop between candidates. An active native RDKit matching call must return before that request can take effect. Accepted reactions remain complete; a stopped run has `termination="user_stopped"` and can be saved. Its match counters and alternative pathways may be incomplete.
+
+Use **Save project** to download a JSON file containing inputs, selected rules, settings, and the network. **Open** accepts either this project file or an existing `network.json`, including supported older schemas. **Export** provides network JSON, a ZIP of CSV tables plus DOT, or a PNG of the current graph view. Browser downloads use the browser's normal download location.
+
+The local server keeps one workspace in memory, shared by browser tabs. Refreshing restores that workspace; saving a project preserves it across server restarts. **New** clears the workspace after confirmation. The server listens only on the local loopback interface. Shut it down with Ctrl+C in its terminal.
+
+To keep dependencies in a separate environment, create it once from the project directory:
+
+```text
+python -m venv .venv-web
+```
+
+Then install and start using that environment's Python directly; activation is not required.
+
+**Windows (PowerShell or Command Prompt):**
+
+```text
+.\.venv-web\Scripts\python.exe -m pip install -e ".[web]"
+.\.venv-web\Scripts\python.exe -m chemweave web
+```
+
+**macOS / Linux:**
+
+```bash
+.venv-web/bin/python -m pip install -e ".[web]"
+.venv-web/bin/python -m chemweave web
+```
+
+For later sessions, run only the launch command for your environment. If `python` is named `python3` on your system, use `python3` when creating the environment. An existing Conda environment can also run the common installation and launch commands above. To reuse packages such as RDKit from the Python environment that creates the virtual environment, add `--system-site-packages` to the `venv` command.
+
+Use `python -m chemweave web --port 8766` to choose another port, or add `--no-browser` to start without opening a browser automatically. When using the separate environment, replace `python` with its platform-specific path shown above. Close the service with Ctrl+C in the terminal.
+
+The backend uses [FastAPI](https://fastapi.tiangolo.com/) and Uvicorn. RDKit draws molecule SVGs. [Cytoscape.js](https://js.cytoscape.org/) 3.34.4 and its MIT license are bundled in the package; the UI does not use a CDN at runtime. No Node.js or frontend build step is needed. Library and command-line generation remain usable without installing the web extra.
 
 ## Python API
 
@@ -211,9 +258,14 @@ The saved `termination` states why generation stopped:
 | `exhausted` | No pending combinations remain within the selected rules and carbon-number range. Targets may still be missing. |
 | `max_depth` | The configured depth boundary was reached; products at that depth are included. |
 | `targets_reached` | All requested target species are present, possibly already among the seeds. |
+| `user_stopped` | A caller or the browser requested a cooperative stop. |
 | `max_species`, `max_reactions` | A size budget prevented adding the next complete reaction; a consistent partial network is saved. |
 
-The command exits with code 0 for exhaustion, depth completion, or target success **provided no requested targets are missing**. A size-budget stop or missing targets returns 2; outputs are still saved. Input errors are reported by Python/RDKit.
+The command exits with code 0 for exhaustion, depth completion, or target success **provided no requested targets are missing**. A size-budget stop, a user stop, or missing targets returns 2; outputs are still saved. Input errors are reported by Python/RDKit.
+
+## Progress and user cancellation in Python
+
+`Generator.generate` accepts optional `progress(network)` and `stop_requested()` callbacks. Progress is reported after seeds are registered and after a complete template/reactant application; the callback sees the current network and should return promptly. When the stop callback returns true, generation returns a consistent partial network with `termination="user_stopped"`. Existing calls need no changes. `Network.to_dict()` and `Network.from_dict()` share the JSON representation used by file persistence.
 
 ## Further development
 

@@ -139,11 +139,9 @@ class Network:
             **self.stats,
         }
 
-    def export_json(self, path):
-        """Save all chemical records and the exact rules/configuration used."""
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        data = {
+    def to_dict(self):
+        """Return the persisted representation, shared by files and the web UI."""
+        return {
             "schema_version": 4,
             "species": [
                 {"id": sid, "smiles": s.smiles, "formula": s.formula,
@@ -162,11 +160,20 @@ class Network:
             "stats": self.stats,
             "termination": self.termination,
         }
-        path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    def export_json(self, path):
+        """Save all chemical records and the exact rules/configuration used."""
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(self.to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     @classmethod
     def from_json(cls, path):
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+
+    @classmethod
+    def from_dict(cls, data):
+        """Restore a saved network without requiring an intermediate file."""
         if data["schema_version"] not in (1, 2, 3, 4):
             raise ValueError(f"Unsupported network schema: {data['schema_version']}")
         species = {}
@@ -180,6 +187,7 @@ class Network:
             species[record["id"]] = s
         reactions = []
         for record in data["reactions"]:
+            record = dict(record)
             if data["schema_version"] == 2:
                 matches = record.pop("matches", [])
                 record["channels"] = [

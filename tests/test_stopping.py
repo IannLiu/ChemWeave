@@ -153,3 +153,25 @@ def test_version_three_network_loads_without_inventing_depths(tmp_path):
     assert restored.species_depths == {}
     assert restored.targets == []
     assert all(r.depth is None for r in restored.reactions)
+
+
+def test_progress_and_cooperative_stop_preserve_completed_reaction():
+    from threading import Event
+
+    cancel = Event()
+    snapshots = []
+
+    def report(network):
+        snapshots.append(network.summary())
+        if network.reactions:
+            cancel.set()
+
+    net = Generator(load_rules(), GenerationConfig(max_carbon=6)).generate(
+        [Species.from_smiles('CCC')], progress=report, stop_requested=cancel.is_set,
+    )
+    assert net.termination == 'user_stopped'
+    assert snapshots[0]['species'] == 1
+    assert snapshots[-1]['reactions'] == 1
+    assert len(net.species) == 3
+    assert net.reactions[0].channels[0]['match_count'] == 24
+    assert Network.from_dict(net.to_dict()).to_dict() == net.to_dict()

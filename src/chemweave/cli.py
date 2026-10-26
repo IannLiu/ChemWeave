@@ -16,7 +16,20 @@ def main():
     generate = subparsers.add_parser("generate", help="Generate a network from a TOML configuration")
     generate.add_argument("--config", type=Path, required=True)
     generate.add_argument("--output", type=Path, default=Path("results"))
+    web = subparsers.add_parser("web", help="Open the local browser interface")
+    web.add_argument("--port", type=int, default=8765)
+    web.add_argument("--no-browser", action="store_true", help="Do not open a browser automatically")
     args = parser.parse_args()
+
+    if args.command == "web":
+        try:
+            from .web import serve
+        except ModuleNotFoundError as error:
+            if error.name not in {"fastapi", "uvicorn", "starlette", "pydantic"}:
+                raise
+            parser.error('Install the web interface first: pip install "chemweave[web]"')
+        serve(port=args.port, open_browser=not args.no_browser)
+        return 0
 
     data = tomllib.loads(args.config.read_text(encoding="utf-8"))
     rule_path = data.get("rules")
