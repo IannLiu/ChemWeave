@@ -23,9 +23,16 @@
 <div class="section-title target-heading"><h3>Target species <span class="optional">Optional</span></h3><button id="add-target" class="small-button" type="button">＋ Add</button></div><p id="target-hint" class="field-hint">Track experimental products. Turn off early stopping to search for alternative routes.</p><div id="targets" class="species-inputs"></div>
 <label class="map-toggle"><input id="stop-on-targets" type="checkbox" checked>Stop when all targets are found</label>
 <details class="advanced"><summary>Advanced settings</summary><div class="input-pair"><label>Max species<input id="max-species" type="number" min="1" value="200" required></label><label>Max reactions<input id="max-reactions" type="number" min="1" value="1000" required></label></div></details></section>
+<section class="config-section"><div class="section-title"><h2><span>04</span> Single-event annotation <span class="optional">Optional</span></h2></div>
+<label class="map-toggle"><input id="single-event-enabled" type="checkbox">Annotate after generation</label>
+<p class="field-hint">Separate symmetry factors and shared intrinsic parameters for elementary reactions. Other families remain unsupported unless factors are imported.</p>
+<button id="single-event-example" class="small-button" type="button">Load methane validation example</button>
+<details class="advanced"><summary>Factors and parameter classes (JSON)</summary><textarea id="single-event-options" rows="7" aria-label="Single-event options" spellcheck="false">{}</textarea><p class="field-hint">Options: calculator, factors, parameters. Imported factors select reaction_id and a 1-based channel, with kinetic_subclass, parameter_class, convention and source.</p></details>
+<button id="apply-single-event" class="small-button" type="button" disabled>Apply to current network</button><p id="single-event-summary" class="field-hint" aria-live="polite"></p>
+</section>
 </fieldset></form>
 <section id="pathway-panel" class="config-section" hidden>
-<div class="section-title"><h2><span>04</span> Formation pathways</h2></div>
+<div class="section-title"><h2><span>05</span> Formation pathways</h2></div>
 <form id="pathway-settings"><fieldset id="pathway-fields">
 <label class="pathway-label">Product to analyze<select id="pathway-target" required aria-label="Product to analyze"></select></label>
 <div class="input-pair"><label>Max reactions per route<input id="pathway-max-reactions" type="number" min="0" step="1" value="8" required></label><label>Max pathways<input id="pathway-max-count" type="number" min="1" step="1" value="100" required></label></div>

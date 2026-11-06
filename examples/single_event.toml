@@ -1,0 +1,17 @@
+# Optional elementary validation family; default network rules remain unchanged.
+rules = "../src/chemweave/data/single_event_rules.json"
+
+[[seeds]]
+smiles = "C"
+name = "Methane"
+
+[[seeds]]
+smiles = "[H]"
+name = "Hydrogen atom"
+
+[generation]
+max_carbon = 1
+max_depth = 1
+
+[single_event]
+calculator = "methane_h_abstraction_v1"

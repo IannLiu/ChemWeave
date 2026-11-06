@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from io import BytesIO
+from importlib.resources import files
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -25,6 +26,7 @@ from .generator import GenerationConfig, Generator
 from .models import Network, Species
 from .pathways import find_pathways
 from .rules import ReactionRule, load_rules
+from .single_event import annotate_single_events
 
 
 class SpeciesInput(BaseModel):
@@ -39,6 +41,7 @@ class RunInput(BaseModel):
     targets: list[SpeciesInput] = Field(default_factory=list)
     rules: list[dict] | None = Field(default=None, min_length=1)
     config: GenerationConfig = Field(default_factory=lambda: GenerationConfig(max_carbon=6, max_depth=4))
+    single_event: dict | None = None
 
 
 class PathwayInput(BaseModel):
@@ -106,6 +109,12 @@ def create_app(browser_url=None):
     def rules():
         return {"version": __version__, "rules": [r.to_dict() for r in load_rules()]}
 
+    @app.get("/api/single-event/example")
+    def single_event_example():
+        rules = json.loads(files("chemweave").joinpath("data/single_event_rules.json").read_text(encoding="utf-8"))
+        return {"seeds": [{"smiles": "C", "name": "Methane"}, {"smiles": "[H]", "name": "Hydrogen atom"}],
+                "rules": rules, "config": {"max_carbon": 1, "max_depth": 1}, "single_event": {}}
+
     @app.post("/api/preview")
     def preview(record: SpeciesInput):
         try:
@@ -161,6 +170,8 @@ def create_app(browser_url=None):
             try:
                 network = generator.generate(seeds, targets=targets, progress=report,
                                              stop_requested=workspace.cancel.is_set)
+                if request.single_event is not None:
+                    annotate_single_events(network, **request.single_event)
                 with workspace.lock:
                     workspace.network = network
                     workspace.summary = network.summary()
@@ -243,6 +254,22 @@ def create_app(browser_url=None):
         workspace.worker.start()
         return {"status": "analyzing"}
 
+    @app.post("/api/single-event")
+    def single_event(options: dict):
+        with workspace.lock:
+            if workspace.status in {"running", "analyzing", "stopping"}:
+                raise HTTPException(409, "A calculation is already running")
+            if workspace.network is None:
+                raise HTTPException(409, "Generate or open a network first")
+            try:
+                annotate_single_events(workspace.network, **options)
+            except (ValueError, TypeError, KeyError) as error:
+                raise HTTPException(422, str(error)) from error
+            workspace.request["single_event"] = workspace.network.single_event["options"]
+            workspace.revision += 1
+            return {"network": workspace.network.to_dict(), "request": workspace.request,
+                    "analysis": workspace.analysis}
+
     @app.post("/api/open")
     def open_project(data: dict):
         try:
@@ -262,6 +289,7 @@ def create_app(browser_url=None):
                     ],
                     "targets": [{k: t.get(k) for k in ("smiles", "name", "phase", "site")} for t in network.targets],
                     "rules": network.rules, "config": network.config,
+                    "single_event": network.single_event["options"] if network.single_event else None,
                 }
             request = RunInput.model_validate(request).model_dump(mode="json")
         except (ValueError, TypeError, KeyError) as error:

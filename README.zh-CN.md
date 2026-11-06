@@ -4,7 +4,7 @@
 
 一个基于 RDKit 反应模板的 Python 反应网络生成包。输入初始物种、反应规则和碳数范围，输出物种表、反应表、计量关系和规则来源。规则与生成算法分开维护，便于随文献整理逐步扩展。
 
-当前版本是网络生成工具。内置四条规则用于检验总体结构变换：烷烃脱氢、烯烃双键迁移、受限的端烯烃偶联和烯烃裂解。**这些示例没有覆盖完整芳构化网络，也不是经过验证的 Ga/H-ZSM-5 基元机理。**
+网络生成是核心 API；可选的 single-event 标注用于组织动力学参数，SEMK 是其中一种用途。默认内置四条规则用于检验总体结构变换：烷烃脱氢、烯烃双键迁移、受限的端烯烃偶联和烯烃裂解。**这些示例没有覆盖完整芳构化网络，也不是经过验证的 Ga/H-ZSM-5 基元机理。**
 
 ## 安装与测试
 
@@ -173,9 +173,9 @@ print(seed.symmetry_classes)  # (map_number, symmetry_class) pairs
 
 基础原子类别通过 `CanonicalRankAtoms(breakTies=False, includeAtomMaps=False)` 计算，不枚举分子自匹配。显式氢新戊烷的类别大小为 1、4、12。真实映射号始终唯一，不会被对称类别标签覆盖。已定义的立体化学会保留；程序不穷举新生成的立体异构体。
 
-这些是单步反应映射。编号属于物种代表或某次反应实例，并非全网唯一的原子身份。多步来源追踪需要连接各步映射，并将产物原子与物种库代表的原子对应起来，不能仅凭编号数值直接连接。通道数及 `match_count` 都不是 SEMK 简并度；物理路径计数和动力学参数共享需要单独处理。本版本不计算速率、转化率或选择性。
+这些是单步反应映射。编号属于物种代表或某次反应实例，并非全网唯一的原子身份。多步来源追踪需要连接各步映射，并将产物原子与物种库代表的原子对应起来，不能仅凭编号数值直接连接。通道数及 `match_count` 都不是 SEMK 简并度；独立因子和动力学参数共享由可选的 single-event 标注模块处理。本版本不拟合参数或求解速率、转化率和选择性。
 
-新的 JSON 导出使用第 4 版格式，保留精简后的通道代表、计数、编号、对称类别、种子输入、物种及反应深度和目标状态。第 3 版文件仍可读取；旧文件缺失的深度保持未知。读取第 2 版文件时，会将原始匹配和通道索引转换为精简表示。第 1 版文件仍可作为结构网络读取，其中不完整的旧来源记录不会保留为映射通道；不能从旧的不带编号结构中恢复来源映射。
+新的 JSON 导出使用第 5 版格式，保留精简后的通道代表、计数、编号、对称类别、种子输入、物种及反应深度和目标状态。第 3、4 版文件仍可读取；旧文件缺失的深度保持未知。读取第 2 版文件时，会将原始匹配和通道索引转换为精简表示。第 1 版文件仍可作为结构网络读取，其中不完整的旧来源记录不会保留为映射通道；不能从旧的不带编号结构中恢复来源映射。
 
 ## 深度与目标物种停止条件
 
@@ -282,7 +282,7 @@ chemweave generate --config examples/propane.toml --output results/propane
 
 | 文件 | 内容 |
 | --- | --- |
-| `network.json` | 完整物种、反应、深度、目标状态、通道映射代表与计数、规则、配置及 RDKit 版本，可重新载入 |
+| `network.json` | 完整物种、反应、深度、目标状态、通道映射代表与计数、可选的 single-event 标注与共享参数、规则、配置及 RDKit 版本，可重新载入 |
 | `species.csv` | 物种 ID、名称、不带映射的结构、分子式、电荷、相态、位点、带映射的 SMILES 及最小深度 |
 | `reactions.csv` | 反应 ID、规则、反应族、步骤性质、两侧计量、模板匹配数、通道数及反应深度 |
 | `channels.csv` | 每个对称等价通道的一份代表性 mapped reaction 及其 `match_count` |
@@ -303,13 +303,86 @@ DOT 导出不依赖 Graphviz；如已安装 Graphviz，可用 `dot -Tsvg results
 
 网络穷尽、达到深度边界或找到全部目标时，命令行在**没有缺失目标**的前提下返回退出码 0。数量预算中止、用户停止或仍缺失目标时返回 2，结果仍会保存。输入错误由 Python/RDKit 报告。
 
+## 可选的 single-event 标注
+
+SEMK 是 ChemWeave 的一种用途。`Generator` 仍然生成通用的规则反应网络，不带动力学假设。可以在生成后调用 `annotate_single_events(network, ...)`，在 CLI 配置中加入 `[single_event]`，或在英文网页的 **Single-event annotation → Annotate after generation** 中启用。省略该选项时网络不带标注。默认四条演示规则仍是总体反应，不会获得基元 single-event 因子。
+
+首个验证族是正向气相 **H/D 原子 + 甲烷(H/D) → 双氢分子 + 甲基自由基**。基元规则单独放在 `src/chemweave/data/single_event_rules.json`；网页的 **Load methane validation example** 可以载入该例，不改变默认规则。对应 CLI 示例：
+
+```bash
+PYTHONPATH=src python -m chemweave generate \
+  --config examples/single_event.toml --output results/single-event
+```
+
+计算器 `methane_h_abstraction_v1` 采用四面体甲烷反应物和沿 C–H/D–H/D 轴的过渡态鞍点，另有三个旁观配体。**以正旋转对称数定义** `n_SE = product(sigma_reactants) / sigma_TS`，不采用完整图自同构数。原子反应物的对称数为 1。该约定不包含产物对称数、电子/核自旋权重、隧穿和再穿越，也不从 atom mapping 推断这些效应；该验证族没有内转子。
+
+| 甲烷 | 转移同位素 | 甲烷 sigma | TS sigma | n_SE |
+| --- | --- | --- | --- | --- |
+| CH4 | H | 12 | 3 | 4 |
+| CH3D | H / D | 3 | 1 / 3 | 3 / 1 |
+| CH2D2 | H / D | 2 | 1 / 1 | 2 / 2 |
+| CHD3 | H / D | 3 | 3 / 1 | 1 / 3 |
+| CD4 | D | 12 | 3 | 4 |
+
+这些 H/D 结果来自上述理想几何及保持同位素的正旋转：Td 有 12 个、C3v 有 3 个、C2v 有 2 个、Cs 有 1 个。[NIST 对称数说明](https://cccbdb.nist.gov/thermox.asp) 介绍了相应约定；[NIST CCCBDB 第 8 号反应](https://cccbdb.nist.gov/ts2x.asp?ri=8) 收录 H + CH4 基元反应；[Hu 等，J. Phys. Chem. A 2006](https://web.stanford.edu/group/Zarelab/publinks/764.pdf) 描述了其 C3v 鞍点。同位素变体验证的是这一对称数约定，不是实验测得的动力学同位素效应。包中未提供拟合或从头算速率常数。
+
+每个映射通道新增 `single_event.reaction_center`：变化的化学键（含键级/立体信息）、变化的原子电荷/自由基/立体状态，以及参与变化的**本次反应局部映射号**。内置计算器检查完整的断成键/自由基变化及气相无位点条件，不依赖规则名称。请统一普通氢的标签：甲烷混用未指定同位素 H 与显式 1H 时不计算因子，因为 RDKit 会将其拆成不同通道。动力学子类包括碳同位素、转移同位素、夺氢原子同位素和旁观氢同位素组成，因此不同同位素环境不会自动共享拟合参数。不支持的基元反应族和总体反应仍保留中心，并明确标为 `unsupported`，不赋因子；没有映射通道的反应列在 `network.single_event["unmapped_reactions"]` 中。
+
+**`match_count` 和通道数均不参与 single-event 因子的计算。** 测试故意改变模板，使匹配次数从 4 变为 12，独立计算的因子仍为 4；提前停止导致的计数不完整也不影响对称数比。目前计算器只覆盖这一正向甲烷族；其他分子、表面状态和逆反应必须给出明确过渡态约定，或导入独立因子。
+
+```python
+from chemweave import Network, annotate_single_events
+
+network = Network.from_json("results/single-event/network.json")
+annotate_single_events(network)
+channel = network.reactions[0].channels[0]
+print(channel["single_event"]["factor"])  # 4.0，来自 12 / 3
+class_id = channel["single_event"]["parameter_class"]
+print(network.single_event["parameters"][class_id])
+# A、n、Ea 初始为 None；status 为 "unfitted"。
+network.export_json("results/single-event/annotated.json")
+network.export_csv("results/single-event")
+```
+
+通道引用 `parameter_class`，参数只在 `network.single_event["parameters"]` 中保存一份，所有引用相同类别的通道共用。固有 modified Arrhenius 约定为 `k_channel(T) = n_SE * A * (T/T_ref)^n * exp(-Ea/(R*T))`：Ea 单位 J/mol，T 和 T_ref 为 K（默认 T_ref = 1 K），R 为 J/(mol K)，A 为 `(m^3/mol)^(molecularity-1) s^-1`。A、n、Ea 在提供前保持空值；标注模块不执行拟合、不求值速率系数，也不判定拟合有效性。`status` 和 `source` 记录用户提供的参数状态与来源。此约定下应拟合已去除 single-event 因子的固有 A；若总体 A 已包含简并度，再乘因子会重复计数。平行通道的速率系数可按每个通道求和一次，不乘模板匹配次数。
+
+其他基元反应族可以直接导入有限正因子，或提供反应物及 TS 对称数。若同时提供因子和对称数，比值必须一致。导入必须指定动力学子类、共享参数类、来源和约定。以下输入可用于上述甲烷示例，属于可复现的对称数输入，**不是实验拟合数据**：
+
+```json
+{
+  "calculator": null,
+  "factors": [{
+    "reaction_id": "R00001", "channel": 1,
+    "kinetic_subclass": "methane-H-abstraction",
+    "parameter_class": "methane-H-fit",
+    "sigma_reactants": [12, 1], "sigma_ts": 3,
+    "convention": "Forward axial saddle; proper rotations; n_SE = 12/3",
+    "source": "Independent symmetry assignment under the documented methane convention"
+  }],
+  "parameters": {
+    "methane-H-fit": {"A": null, "n": null, "Ea": null, "status": "unfitted", "source": "Awaiting experimental fitting"}
+  }
+}
+```
+
+保存为 `single-event.json` 后，可对已有网络标注：
+
+```bash
+python -m chemweave annotate --network results/single-event/network.json \
+  --annotations single-event.json --output results/annotated
+```
+
+这些键同样适用于 `annotate_single_events(network, **options)` 和网页 **Factors and parameter classes (JSON)** 编辑区。**Apply to current network** 可以更新已载入的网络，无需重新生成。通道索引从 1 开始，只指向该保存网络中的记录；重新生成后应重新核对选择器。同一参数类不能混用不同分子数。内置计算器为每个动力学子类分配一个参数类；导入时可以明确指定其他共享关系。每次应用配置会替换旧标注和参数记录，因此需要保留的导入因子及参数值也应包含在配置中。`calculator: null` 关闭自动因子计算，仍提取反应中心。
+
+网络 JSON 第 5 版及网页项目文件保留中心、子类/共享参数类引用、独立因子、约定、来源、共享参数记录和可复现的标注配置。第 1–4 版仍可读取；缺少完整映射的旧记录在获得可用映射前不会被推断赋因子。仅在应用标注后，CSV 导出增加 **`single_event.csv`**（每个映射通道一条，包括不支持状态及中心）与 **`kinetic_parameters.csv`**（每个共享参数类一条）；原有 CSV 列保持不变。英文网页的反应详情可切换通道，查看中心、独立因子、对称数/过渡态约定、动力学子类、共享参数类以及已提供或待拟合的参数值。Save/Open 与 JSON/CSV 下载保留相同数据。
+
 ## Python 中的进度与用户停止
 
 `Generator.generate` 新增可选的 `progress(network)` 和 `stop_requested()` 回调。完成种子登记和每次完整的模板/反应物组合执行后报告进度；进度回调访问当前网络，应尽快返回。停止回调返回真时，生成器返回结构一致的部分网络，并标记 `termination="user_stopped"`。已有调用无需修改。`Network.to_dict()`、`Network.from_dict()` 与文件持久化共用 JSON 表示。
 
 ## 后续扩展
 
-先用带来源和适用条件的规则逐步补齐裂解、支化、环化和芳烃生成路径，再比较提高碳数上限后的变化。随后根据选定的表面机理加入空位和催化剂状态表示，最后接入 Single-event 参数组织和动力学求解。
+先用带来源和适用条件的规则逐步补齐裂解、支化、环化和芳烃生成路径，再比较提高碳数上限后的变化。随后根据选定的表面机理加入空位和催化剂状态表示，用实验数据拟合可选的 single-event 共享参数，再作为独立应用接入动力学求解。
 
 ## 参考
 

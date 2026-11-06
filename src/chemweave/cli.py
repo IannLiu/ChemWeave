@@ -9,6 +9,7 @@ from .generator import GenerationConfig, Generator
 from .models import Network, Species
 from .pathways import find_pathways
 from .rules import load_rules
+from .single_event import annotate_single_events
 
 
 def main():
@@ -17,6 +18,10 @@ def main():
     generate = subparsers.add_parser("generate", help="Generate a network from a TOML configuration")
     generate.add_argument("--config", type=Path, required=True)
     generate.add_argument("--output", type=Path, default=Path("results"))
+    annotate = subparsers.add_parser("annotate", help="Add optional single-event annotations to a saved network")
+    annotate.add_argument("--network", type=Path, required=True)
+    annotate.add_argument("--annotations", type=Path, help="JSON calculator, factors and parameters options")
+    annotate.add_argument("--output", type=Path, default=Path("results/annotated"))
     web = subparsers.add_parser("web", help="Open the local browser interface")
     web.add_argument("--port", type=int, default=8765)
     web.add_argument("--no-browser", action="store_true", help="Do not open a browser automatically")
@@ -27,6 +32,16 @@ def main():
     pathways.add_argument("--max-pathways", type=int, default=100)
     pathways.add_argument("--output", type=Path, default=Path("pathways.json"))
     args = parser.parse_args()
+
+    if args.command == "annotate":
+        network = Network.from_json(args.network)
+        options = json.loads(args.annotations.read_text(encoding="utf-8")) if args.annotations else {}
+        annotate_single_events(network, **options)
+        network.export_json(args.output / "network.json")
+        network.export_csv(args.output)
+        network.export_dot(args.output / "network.dot")
+        print(json.dumps(network.summary(), indent=2))
+        return 0
 
     if args.command == "pathways":
         network = Network.from_json(args.network)
@@ -58,6 +73,8 @@ def main():
         [Species.from_smiles(**record) for record in data["seeds"]],
         targets=[Species.from_smiles(**record) for record in data.get("targets", [])],
     )
+    if "single_event" in data:
+        annotate_single_events(network, **data["single_event"])
     network.export_json(args.output / "network.json")
     network.export_csv(args.output)
     network.export_dot(args.output / "network.dot")

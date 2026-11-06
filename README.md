@@ -4,7 +4,7 @@
 
 A Python package for generating chemical reaction networks from RDKit reaction templates. Provide seed species, reaction rules, and a carbon-number limit to produce species tables, reaction tables, stoichiometry, and rule provenance. Rules are maintained separately from the enumeration algorithm so the chemistry can evolve as the mechanism is developed.
 
-The current release provides network generation. Four bundled rules demonstrate overall structural transformations: alkane dehydrogenation, olefin double-bond migration, restricted terminal-olefin coupling, and olefin scission. **These examples do not cover a complete aromatization network and are not a validated elementary mechanism for Ga/H-ZSM-5.**
+Network generation is the core API; optional single-event annotations support kinetic parameter organization, including SEMK as one application. Four default bundled rules demonstrate overall structural transformations: alkane dehydrogenation, olefin double-bond migration, restricted terminal-olefin coupling, and olefin scission. **These examples do not cover a complete aromatization network and are not a validated elementary mechanism for Ga/H-ZSM-5.**
 
 ## Installation and testing
 
@@ -173,9 +173,9 @@ Channel grouping uses a canonical graph of the complete reaction before and afte
 
 Basic atom classes use `CanonicalRankAtoms(breakTies=False, includeAtomMaps=False)`, without enumerating self-matches. Explicit-H neopentane has class sizes 1, 4, and 12. True atom maps remain unique and are never replaced by symmetry-class labels. Defined stereochemistry is retained; new stereoisomers are not exhaustively generated.
 
-These are single-step mappings. Numbers are local to a species representative or a reaction occurrence, not globally unique atom identities throughout the network. Multi-step ancestry requires composing the individual mappings and reconciling product atoms with the species registry representatives; map integers alone do not establish that correspondence. Neither channel counts nor `match_count` values are SEMK degeneracy factors. Physical pathway counting and kinetic parameter sharing remain separate work. This version does not calculate rates, conversions, or selectivities.
+These are single-step mappings. Numbers are local to a species representative or a reaction occurrence, not globally unique atom identities throughout the network. Multi-step ancestry requires composing the individual mappings and reconciling product atoms with the species registry representatives; map integers alone do not establish that correspondence. Neither channel counts nor `match_count` values are SEMK degeneracy factors. Independent factors and kinetic parameter sharing are handled by the optional single-event annotation module. The package does not fit parameters or solve rates, conversions, or selectivities.
 
-New JSON exports use schema version 4 and preserve compact channel representatives, counters, numbering, symmetry classes, seed inputs, species/reaction depths, and target status. Version-3 files remain readable; depths absent from older files are left unknown. Loading a version-2 file converts its raw matches and channel indices to the compact representation. Version-1 files remain readable as structural networks; their incomplete legacy provenance is not retained as mapped channels. Source atom mappings cannot be recovered from an old unmapped structure.
+New JSON exports use schema version 5 and preserve compact channel representatives, counters, numbering, symmetry classes, seed inputs, species/reaction depths, and target status. Version-3 and version-4 files remain readable; depths absent from older files are left unknown. Loading a version-2 file converts its raw matches and channel indices to the compact representation. Version-1 files remain readable as structural networks; their incomplete legacy provenance is not retained as mapped channels. Source atom mappings cannot be recovered from an old unmapped structure.
 
 ## Depth and target stopping
 
@@ -282,7 +282,7 @@ A custom `rules = "my_rules.json"` entry is resolved relative to the configurati
 
 | File | Contents |
 | --- | --- |
-| `network.json` | Complete species, reactions, depths, target status, representative channel mappings and counts, rules, configuration, and RDKit version; can be reloaded. |
+| `network.json` | Complete species, reactions, depths, target status, representative channel mappings and counts, optional single-event annotations/parameters, rules, configuration, and RDKit version; can be reloaded. |
 | `species.csv` | Species ID, name, unmapped structure, formula, charge, phase, site, mapped SMILES, and minimum depth. |
 | `reactions.csv` | Reaction ID, rule, family, step classification, stoichiometry on both sides, template-match count, channel count, and reaction depth. |
 | `channels.csv` | One representative mapped reaction and its `match_count` for each symmetry-grouped channel. |
@@ -303,13 +303,86 @@ The saved `termination` states why generation stopped:
 
 The command exits with code 0 for exhaustion, depth completion, or target success **provided no requested targets are missing**. A size-budget stop, a user stop, or missing targets returns 2; outputs are still saved. Input errors are reported by Python/RDKit.
 
+## Optional single-event annotation
+
+SEMK is one use of ChemWeave. `Generator` continues to enumerate general rule-based networks without kinetic assumptions. Call `annotate_single_events(network, ...)` afterwards, add a `[single_event]` TOML section for CLI generation, or enable **Single-event annotation → Annotate after generation** in the English browser interface. Omitting the option leaves networks unannotated. The four default demo rules remain overall transformations and receive no elementary single-event factors.
+
+The first validation family is forward gas-phase **H/D atom + methane(H/D) → dihydrogen + methyl radical**. Its elementary rule is distributed separately in `src/chemweave/data/single_event_rules.json`; **Load methane validation example** loads it in the browser without changing the default rules. Run the same example from the CLI:
+
+```bash
+PYTHONPATH=src python -m chemweave generate \
+  --config examples/single_event.toml --output results/single-event
+```
+
+The calculator `methane_h_abstraction_v1` adopts a tetrahedral methane reactant and an axial C–H/D–H/D saddle with three spectator ligands. **Proper rotational symmetry numbers** define `n_SE = product(sigma_reactants) / sigma_TS`. They are not full graph automorphism counts. The atomic reactant has symmetry number 1. This convention excludes product symmetry, electronic/nuclear spin weights, tunneling, and recrossing; these are not inferred from atom mapping. There are no internal rotors in this validation family.
+
+| Methane | Transferred isotope | Methane sigma | TS sigma | n_SE |
+| --- | --- | --- | --- | --- |
+| CH4 | H | 12 | 3 | 4 |
+| CH3D | H / D | 3 | 1 / 3 | 3 / 1 |
+| CH2D2 | H / D | 2 | 1 / 1 | 2 / 2 |
+| CHD3 | H / D | 3 | 3 / 1 | 1 / 3 |
+| CD4 | D | 12 | 3 | 4 |
+
+These H/D results follow from the stated idealized geometry and isotope-preserving proper rotations: Td has 12 rotations, C3v has 3, C2v has 2, and Cs has 1. [NIST's symmetry-number explanation](https://cccbdb.nist.gov/thermox.asp) documents the convention; [NIST CCCBDB reaction 8](https://cccbdb.nist.gov/ts2x.asp?ri=8) identifies the H + CH4 elementary reaction. [Hu et al., J. Phys. Chem. A 2006](https://web.stanford.edu/group/Zarelab/publinks/764.pdf) describes its C3v saddle. The isotope variants validate this symmetry convention, not measured kinetic isotope effects. No fitted or ab initio rate constants are bundled.
+
+Each mapped channel receives `single_event.reaction_center`: changed bonds (including order/stereo), changed atom charge/radical/stereo states, and the participating **reaction-local atom maps**. The built-in calculator recognizes the complete bond/radical transformation and gas/no-site state, rather than trusting a rule name. Use consistent protium labels: methane mixing unlabeled H with explicit 1H is unsupported because those labels split RDKit channels. Its kinetic subclass includes carbon isotope, transferred isotope, abstractor isotope, and spectator isotope composition. Distinct isotope environments therefore do not automatically share fitted parameters. Unsupported elementary families and overall transformations retain a center and an explicit `unsupported` status with no factor. Reactions without mapping channels are listed in `network.single_event["unmapped_reactions"]`.
+
+**`match_count` and channel count are never single-event factors.** Validation tests deliberately change the template to produce 4 versus 12 matches while the independently calculated factor remains 4. Early-stop counters likewise do not change the symmetry ratio. The calculator covers only this forward methane family; extending it to other molecules, surface states, or reverse reactions requires an explicit transition-state convention or independently imported factors.
+
+```python
+from chemweave import Network, annotate_single_events
+
+network = Network.from_json("results/single-event/network.json")
+annotate_single_events(network)
+channel = network.reactions[0].channels[0]
+print(channel["single_event"]["factor"])  # 4.0, from 12 / 3
+class_id = channel["single_event"]["parameter_class"]
+print(network.single_event["parameters"][class_id])
+# A, n, Ea start as None; status is "unfitted".
+network.export_json("results/single-event/annotated.json")
+network.export_csv("results/single-event")
+```
+
+A channel references one `parameter_class`; its values live once in `network.single_event["parameters"]`, shared by every channel referencing that class. The intrinsic modified Arrhenius convention is `k_channel(T) = n_SE * A * (T/T_ref)^n * exp(-Ea/(R*T))`, with Ea in J/mol, T and T_ref in K (default T_ref = 1 K), R in J/(mol K), and A in `(m^3/mol)^(molecularity-1) s^-1`. A, n, and Ea remain null until supplied; annotation does not perform fitting, evaluate rate coefficients, or assert that a fit is valid. `status` and `source` record user-supplied parameter provenance. When using this convention, fit intrinsic A with the single-event factor removed; an overall A that already includes degeneracy would double-count it. Parallel channel rate coefficients may be summed once per channel, without multiplying by template-match counts.
+
+Other elementary families can import positive finite factors directly, or supply reactant symmetry numbers and a TS symmetry number. If both are supplied, their ratio must agree with the factor. An import must specify its kinetic subclass, shared parameter class, source, and convention. The example below is a reproducible symmetry input for the methane example, **not experimental fit data**:
+
+```json
+{
+  "calculator": null,
+  "factors": [{
+    "reaction_id": "R00001", "channel": 1,
+    "kinetic_subclass": "methane-H-abstraction",
+    "parameter_class": "methane-H-fit",
+    "sigma_reactants": [12, 1], "sigma_ts": 3,
+    "convention": "Forward axial saddle; proper rotations; n_SE = 12/3",
+    "source": "Independent symmetry assignment under the documented methane convention"
+  }],
+  "parameters": {
+    "methane-H-fit": {"A": null, "n": null, "Ea": null, "status": "unfitted", "source": "Awaiting experimental fitting"}
+  }
+}
+```
+
+Save these options as `single-event.json`, then annotate a saved network:
+
+```bash
+python -m chemweave annotate --network results/single-event/network.json \
+  --annotations single-event.json --output results/annotated
+```
+
+The same keys are accepted by `annotate_single_events(network, **options)` and the browser's **Factors and parameter classes (JSON)** editor. **Apply to current network** updates the loaded network without regeneration. Channel indices are 1-based and identify records in that specific saved network; recheck selectors after regenerating. A shared class cannot mix molecularities. The built-in calculator assigns one parameter class per kinetic subclass; imports can explicitly specify different sharing. Applying options replaces previous annotations and parameter records, so include any imported factors and parameter values you want to retain. `calculator: null` disables automatic factor calculation while preserving center extraction.
+
+Network JSON schema 5 and saved browser projects retain centers, subclass/class references, independent factors, conventions, provenance, shared parameter records, and reproducible annotation options. Schema 1–4 remains readable; old records without complete mapping remain unannotated until usable mappings are available. CSV export adds **`single_event.csv`** (one annotation per mapped channel, including unsupported status and center) and **`kinetic_parameters.csv`** (one record per shared class) only when annotation has been applied. Existing CSV tables keep their columns. In the English reaction inspector, select a channel to view its center, independent factor, symmetry/TS convention, subclass, shared class, and fitted/unfitted values. Save/Open and JSON/CSV downloads preserve the same data.
+
 ## Progress and user cancellation in Python
 
 `Generator.generate` accepts optional `progress(network)` and `stop_requested()` callbacks. Progress is reported after seeds are registered and after a complete template/reactant application; the callback sees the current network and should return promptly. When the stop callback returns true, generation returns a consistent partial network with `termination="user_stopped"`. Existing calls need no changes. `Network.to_dict()` and `Network.from_dict()` share the JSON representation used by file persistence.
 
 ## Further development
 
-Extend the rule set with sources and applicability conditions for cracking, branching, cyclization, and aromatic formation, then compare results at higher carbon-number limits. Add vacant-site and catalyst-state representations based on the selected surface mechanism, followed by single-event parameter organization and kinetic solving.
+Extend the rule set with sources and applicability conditions for cracking, branching, cyclization, and aromatic formation, then compare results at higher carbon-number limits. Add vacant-site and catalyst-state representations based on the selected surface mechanism, then fit the optional shared single-event parameters against experiments and add kinetic solving as a separate application.
 
 ## References
 

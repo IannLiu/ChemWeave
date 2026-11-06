@@ -380,7 +380,8 @@ details[open]>summary:before {
   margin-top:12px;
 }
 
-.batch-input textarea {
+.batch-input textarea,
+#single-event-options {
   width:100%;
   margin:9px 0;
   border:1px solid var(--line);
@@ -1438,3 +1439,5 @@ dialog>div {
 #pathway-panel .input-pair {
   align-items:end;
 }
+
+.single-event-details dd { overflow-wrap:anywhere; }

@@ -3,7 +3,7 @@
 const $ = id => document.getElementById(id);
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const moleculeURL = (smiles, mapped = false) => `/api/molecule?smiles=${encodeURIComponent(smiles)}&mapped=${mapped}`;
-const ruleNames = {alkane_dehydrogenation:'Alkane dehydrogenation',olefin_double_bond_shift:'Olefin double-bond shift',terminal_olefin_coupling:'Terminal-olefin coupling',olefin_scission:'Olefin scission'};
+const ruleNames = {methane_h_abstraction:'Methane H/D atom abstraction',alkane_dehydrogenation:'Alkane dehydrogenation',olefin_double_bond_shift:'Olefin double-bond shift',terminal_olefin_coupling:'Terminal-olefin coupling',olefin_scission:'Olefin scission'};
 const reasons = {exhausted:'Network exhausted',max_depth:'Depth limit reached',targets_reached:'All targets found',max_species:'Species limit reached',max_reactions:'Reaction limit reached',user_stopped:'Stopped by user'};
 let builtinRules = [], availableRules = [], network = null, speciesById = new Map(), reactionsById = new Map();
 let selectedId = null, focusId = null, loadedRevision = -1, busy = false, polling = false;
@@ -102,6 +102,8 @@ function fillSettings(request) {
   const config = request.config || {};
   for (const [id,key,fallback] of [['max-carbon','max_carbon',6],['max-depth','max_depth',null],['max-species','max_species',200],['max-reactions','max_reactions',1000]]) $(id).value = config[key] ?? fallback ?? '';
   $('stop-on-targets').checked = config.stop_when_targets_found ?? true;
+  $('single-event-enabled').checked = request.single_event != null;
+  $('single-event-options').value = JSON.stringify(request.single_event || {},null,2);
   renderRules(request.rules || builtinRules,request.rules ? 'Project rules' : 'Built-in demo rules');
 }
 
@@ -109,6 +111,7 @@ function setBusy(value) {
   busy = value;
   $('configuration-fields').disabled = value;
   $('pathway-fields').disabled = value;
+  $('apply-single-event').disabled = value || !network;
   $('pathway-view').disabled = value;
   $('export-pathways').disabled = value;
   $('run').hidden = value;
@@ -128,6 +131,8 @@ async function startGeneration(event) {
   if (!seeds.length) return message('Add at least one seed species.');
   if (!rules.length) return message('Select at least one reaction rule.');
   const request = {seeds,targets:records('targets'),rules,config:{stop_when_targets_found:$('stop-on-targets').checked,max_carbon:Number($('max-carbon').value),max_depth:$('max-depth').value === '' ? null : Number($('max-depth').value),max_species:Number($('max-species').value),max_reactions:Number($('max-reactions').value)}};
+  try { request.single_event = $('single-event-enabled').checked ? JSON.parse($('single-event-options').value) : null; }
+  catch (error) { return message(`Invalid single-event JSON: ${error.message}`); }
   message();
   setBusy(true);
   try {
@@ -146,6 +151,10 @@ async function startGeneration(event) {
 
 function loadNetwork(payload, restoreSettings = false) {
   network = payload.network;
+  $('apply-single-event').disabled = busy;
+  const seChannels = network.reactions.flatMap(r => r.channels.map(c => c.single_event)).filter(Boolean);
+  $('single-event-summary').textContent = network.single_event ? `${seChannels.filter(c => c.status !== 'unsupported').length} annotated / ${seChannels.length} mapped channels · ${Object.keys(network.single_event.parameters).length} shared parameter classes · ${network.single_event.unmapped_reactions.length} unmapped reactions` : '';
+
   speciesById = new Map(network.species.map(s => [s.id,s]));
   reactionsById = new Map(network.reactions.map(r => [r.id,r]));
   selectedId = focusId = null;
@@ -252,11 +261,21 @@ function showReaction(reaction, channelIndex = 0, mapped = false) {
     const smiles = mapped && channel ? channel[side === 0 ? 'mapped_reactant_smiles' : 'mapped_product_smiles'][index] : s.smiles;
     return `<div class="reaction-molecule"><img src="${escapeHTML(moleculeURL(smiles,mapped))}" alt="${escapeHTML(smiles)}"><small>${escapeHTML(s.name || s.formula)} · ${escapeHTML(sid)}</small></div>`;
   }).join('');
-  $('details').innerHTML = `<div class="detail-content"><span class="detail-kicker">REACTION · ${escapeHTML(reaction.id)}</span><h3>${escapeHTML(ruleNames[reaction.rule_id] || reaction.rule_id)}</h3><span class="detail-tag">Depth ${reaction.depth ?? 'Unknown'}</span><span class="detail-tag">${reaction.kind === 'overall' ? 'Overall transformation' : escapeHTML(reaction.kind)}</span>${channels.length ? `<select id="channel" class="channel-select" aria-label="Mapping channel">${channels.map((c,i) => `<option value="${i}" ${i === channelIndex ? 'selected' : ''}>Channel ${i+1} · ${c.match_count} template matches</option>`).join('')}</select><label class="map-toggle"><input id="reaction-map" type="checkbox" ${mapped ? 'checked' : ''}>Show reaction atom-map numbers</label>` : '<p class="detail-note">This legacy record has no complete mapping channels.</p>'}<div class="reaction-side">${cards(sides[0],0)}</div><div class="reaction-arrow">↓</div><div class="reaction-side">${cards(sides[1],1)}</div><dl><dt>Rule ID / reaction family</dt><dd>${escapeHTML(reaction.rule_id)}<br>${escapeHTML(reaction.family)}</dd></dl>${mapped && channel ? `<details><summary>Mapped reaction SMILES</summary><code>${escapeHTML(channel.mapped_reaction_smiles)}</code></details>` : ''}<p class="detail-note">Each channel stores one representative of symmetry-equivalent mappings. Template-match counts are not kinetic degeneracy factors and may be incomplete after an early stop.</p></div>`;
+  $('details').innerHTML = `<div class="detail-content"><span class="detail-kicker">REACTION · ${escapeHTML(reaction.id)}</span><h3>${escapeHTML(ruleNames[reaction.rule_id] || reaction.rule_id)}</h3><span class="detail-tag">Depth ${reaction.depth ?? 'Unknown'}</span><span class="detail-tag">${reaction.kind === 'overall' ? 'Overall transformation' : escapeHTML(reaction.kind)}</span>${channels.length ? `<select id="channel" class="channel-select" aria-label="Mapping channel">${channels.map((c,i) => `<option value="${i}" ${i === channelIndex ? 'selected' : ''}>Channel ${i+1} · ${c.match_count} template matches</option>`).join('')}</select><label class="map-toggle"><input id="reaction-map" type="checkbox" ${mapped ? 'checked' : ''}>Show reaction atom-map numbers</label>` : '<p class="detail-note">This legacy record has no complete mapping channels.</p>'}<div class="reaction-side">${cards(sides[0],0)}</div><div class="reaction-arrow">↓</div><div class="reaction-side">${cards(sides[1],1)}</div><dl><dt>Rule ID / reaction family</dt><dd>${escapeHTML(reaction.rule_id)}<br>${escapeHTML(reaction.family)}</dd></dl>${mapped && channel ? `<details><summary>Mapped reaction SMILES</summary><code>${escapeHTML(channel.mapped_reaction_smiles)}</code></details>` : ''}${singleEventDetails(channel)}<p class="detail-note">Each channel stores one representative of symmetry-equivalent mappings. Template-match counts are not kinetic degeneracy factors and may be incomplete after an early stop.</p></div>`;
   if (channels.length) {
     $('channel').onchange = event => showReaction(reaction,Number(event.target.value),$('reaction-map').checked);
     $('reaction-map').onchange = event => showReaction(reaction,Number($('channel').value),event.target.checked);
   }
+}
+
+function singleEventDetails(channel) {
+  const se = channel?.single_event;
+  if (!se) return '';
+  const center = se.reaction_center;
+  const parameter = network.single_event?.parameters[se.parameter_class];
+  const atoms = center.atom_changes.map(c => `Atom ${c.atom}: ` + Object.keys(c.before).filter(k => c.before[k] !== c.after[k]).map(k => `${k === 'radicals' ? 'radical electrons' : k} ${c.before[k] === '' ? 'unspecified' : c.before[k]} → ${c.after[k] === '' ? 'unspecified' : c.after[k]}`).join(', ')).join('; ');
+  const bonds = center.bond_changes.map(c => `${c.atoms.join('–')}: ${c.before?.order ?? 'none'} → ${c.after?.order ?? 'none'}`).join('; ');
+  return `<div class="single-event-details"><h4>Single-event annotation</h4><dl><dt>Status</dt><dd>${escapeHTML(se.status)}</dd><dt>Reaction center (atom maps)</dt><dd>${escapeHTML(center.atom_maps.join(', '))}</dd><dt>Bond changes</dt><dd>${escapeHTML(bonds || 'None')}</dd><dt>Atom-state changes</dt><dd><code>${escapeHTML(atoms || 'None')}</code></dd>${se.status === 'unsupported' ? `<dt>Reason</dt><dd>${escapeHTML(se.reason)}</dd>` : `<dt>Independent single-event factor</dt><dd>${escapeHTML(se.factor)}</dd><dt>Reactant / TS symmetry numbers</dt><dd>${escapeHTML(se.sigma_reactants?.join(' × ') ?? 'Imported directly')} / ${escapeHTML(se.sigma_ts ?? '—')}</dd><dt>Kinetic subclass</dt><dd><code>${escapeHTML(se.kinetic_subclass)}</code></dd><dt>Shared parameter class</dt><dd><code>${escapeHTML(se.parameter_class)}</code></dd><dt>Intrinsic parameters</dt><dd>A = ${escapeHTML(parameter?.A ?? 'Unfitted')} ${escapeHTML(parameter?.A_units)}<br>n = ${escapeHTML(parameter?.n ?? 'Unfitted')}<br>Ea = ${escapeHTML(parameter?.Ea ?? 'Unfitted')} ${escapeHTML(parameter?.Ea_units)}<br>T_ref = ${escapeHTML(parameter?.T_ref)} K<br>${escapeHTML(parameter?.status)} · ${escapeHTML(parameter?.source)}</dd><dt>Rate convention</dt><dd><code>${escapeHTML(network.single_event.rate_law)}</code></dd><dt>Symmetry / transition-state convention</dt><dd>${escapeHTML(se.convention)}</dd><dt>Factor source</dt><dd>${escapeHTML(se.source)}</dd>`}</dl></div>`;
 }
 
 async function pollStatus() {
@@ -357,6 +376,21 @@ $('pathway-settings').addEventListener('submit',startPathwayAnalysis);
 $('pathway-view').onchange = showPathway;
 $('export-pathways').onclick = () => { window.location.href = '/api/export/pathways'; };
 
+$('single-event-example').onclick = async () => {
+  try { fillSettings(await api('/api/single-event/example')); message('Methane + H atom example loaded. Generate to validate sigma_R / sigma_TS = 12 / 3 = 4.',true); }
+  catch (error) { message(error.message); }
+};
+$('apply-single-event').onclick = async () => {
+  if (busy || !network) return;
+  try {
+    const options = JSON.parse($('single-event-options').value);
+    const payload = await api('/api/single-event',{method:'POST',body:JSON.stringify(options)});
+    const state = await api('/api/status');
+    loadedRevision = state.revision;
+    loadNetwork(payload,true);
+    message('Single-event annotations and shared parameter classes updated.',true);
+  } catch (error) { message(error.message); }
+};
 $('settings').addEventListener('submit',startGeneration);
 $('run-example').onclick = () => $('settings').requestSubmit();
 $('add-seed').onclick = () => addSpecies('seeds');

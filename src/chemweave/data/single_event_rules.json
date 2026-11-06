@@ -1,0 +1,10 @@
+[
+  {
+    "id": "methane_h_abstraction",
+    "smarts": "[C;X4;H4;+0:1]-[H:2].[#1;D0;+0:3]>>[C;H0;+0:1].[H:2]-[H:3]",
+    "family": "hydrogen_abstraction",
+    "kind": "elementary",
+    "source": "Forward gas-phase methane + H/D atom abstraction; NIST CCCBDB reaction 8: https://cccbdb.nist.gov/ts2x.asp?ri=8",
+    "notes": "Validation family for optional single-event annotation. Tetrahedral methane and an axial C-H-H saddle; proper rotational symmetry only. No rate constants supplied."
+  }
+]

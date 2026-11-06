@@ -50,6 +50,36 @@ def test_assets_and_molecule_previews(client):
     assert 'atom-0' in mapped.text and 'atom-1' in mapped.text
 
 
+def test_single_event_example_annotation_export_and_restore(client):
+    request = client.get('/api/single-event/example').json()
+    assert request['rules'][0]['kind'] == 'elementary'
+    assert client.post('/api/single-event', json={}).status_code == 409
+    assert client.post('/api/run', json=request).status_code == 202
+    assert finish(client)['status'] == 'finished'
+    payload = client.get('/api/network').json()
+    se = payload['network']['reactions'][0]['channels'][0]['single_event']
+    assert se['status'] == 'calculated' and se['factor'] == 4
+    assert se['sigma_reactants'] == [12, 1] and se['sigma_ts'] == 3
+    assert 'Independent single-event factor' in client.get('/static/app.js').text
+    class_id = se['parameter_class']
+    options = {'parameters': {class_id: {'Ea': 42000, 'source': 'Illustrative fit input'}}}
+    updated = client.post('/api/single-event', json=options)
+    assert updated.status_code == 200
+    assert updated.json()['network']['single_event']['parameters'][class_id]['Ea'] == 42000
+    before = client.get('/api/network').json()
+    assert client.post('/api/single-event', json={'calculator': 'unknown'}).status_code == 422
+    assert client.get('/api/network').json() == before
+    with ZipFile(BytesIO(client.get('/api/export/csv').content)) as archive:
+        assert {'single_event.csv', 'kinetic_parameters.csv'} <= set(archive.namelist())
+        assert '42000' in archive.read('kinetic_parameters.csv').decode('utf-8-sig')
+    project = client.get('/api/export/project').json()
+    assert client.post('/api/new').status_code == 200
+    assert client.post('/api/open', json=project).json() == before
+    raw = client.post('/api/open', json=before['network']).json()
+    assert raw['request']['single_event'] == raw['network']['single_event']['options']
+    assert raw['network'] == before['network']
+
+
 def test_generation_downloads_and_project_restore(client):
     request = {'seeds': [{'smiles': 'CCC', 'name': 'propane'}],
                'config': {'max_carbon': 6, 'max_depth': 2}}

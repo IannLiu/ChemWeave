@@ -124,6 +124,7 @@ class Network:
     config: dict = field(default_factory=dict)
     stats: dict = field(default_factory=dict)
     termination: str = "exhausted"
+    single_event: dict | None = None
 
     def summary(self):
         return {
@@ -142,7 +143,7 @@ class Network:
     def to_dict(self):
         """Return the persisted representation, shared by files and the web UI."""
         return {
-            "schema_version": 4,
+            "schema_version": 5,
             "species": [
                 {"id": sid, "smiles": s.smiles, "formula": s.formula,
                  "phase": s.phase, "site": s.site, "name": s.name,
@@ -159,6 +160,7 @@ class Network:
             "config": self.config,
             "stats": self.stats,
             "termination": self.termination,
+            "single_event": self.single_event,
         }
 
     def export_json(self, path):
@@ -174,7 +176,7 @@ class Network:
     @classmethod
     def from_dict(cls, data):
         """Restore a saved network without requiring an intermediate file."""
-        if data["schema_version"] not in (1, 2, 3, 4):
+        if data["schema_version"] not in (1, 2, 3, 4, 5):
             raise ValueError(f"Unsupported network schema: {data['schema_version']}")
         species = {}
         for record in data["species"]:
@@ -210,6 +212,7 @@ class Network:
             targets=data.get("targets", []),
             rules=data["rules"], config=data["config"],
             stats=data["stats"], termination=data["termination"],
+            single_event=data.get("single_event"),
         )
 
     def export_csv(self, directory):
@@ -236,6 +239,24 @@ class Network:
             for r in self.reactions:
                 for i, channel in enumerate(r.channels, 1):
                     writer.writerow([r.id, i, channel["mapped_reaction_smiles"], channel["match_count"]])
+        if self.single_event is not None:
+            with (directory / "single_event.csv").open("w", encoding="utf-8-sig", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["reaction_id", "channel", "status", "kinetic_subclass", "parameter_class",
+                                 "factor", "sigma_reactants", "sigma_ts", "convention", "source", "reason", "reaction_center"])
+                for r in self.reactions:
+                    for i, channel in enumerate(r.channels, 1):
+                        se = channel.get("single_event", {})
+                        writer.writerow([r.id, i, *[se.get(k) for k in ("status", "kinetic_subclass", "parameter_class", "factor")],
+                                         json.dumps(se.get("sigma_reactants")), se.get("sigma_ts"),
+                                         se.get("convention"), se.get("source"), se.get("reason"),
+                                         json.dumps(se.get("reaction_center"))])
+            with (directory / "kinetic_parameters.csv").open("w", encoding="utf-8-sig", newline="") as f:
+                writer = csv.writer(f)
+                fields = ["A", "n", "Ea", "T_ref", "A_units", "Ea_units", "T_ref_units", "molecularity", "status", "source"]
+                writer.writerow(["parameter_class", *fields])
+                for class_id, record in self.single_event["parameters"].items():
+                    writer.writerow([class_id, *[record[k] for k in fields]])
         with (directory / "stoichiometry.csv").open("w", encoding="utf-8-sig", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(["reaction_id", "side", "species_id", "coefficient"])
