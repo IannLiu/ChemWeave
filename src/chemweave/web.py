@@ -27,6 +27,7 @@ from .models import Network, Species
 from .pathways import find_pathways
 from .rules import ReactionRule, load_rules
 from .single_event import annotate_single_events
+from .path_degeneracy import path_family_rules
 
 
 class SpeciesInput(BaseModel):
@@ -34,6 +35,7 @@ class SpeciesInput(BaseModel):
     name: str = ""
     phase: str = "gas"
     site: str | None = None
+    site_atoms: dict = Field(default_factory=dict)
 
 
 class RunInput(BaseModel):
@@ -98,6 +100,24 @@ def create_app(browser_url=None):
     app = FastAPI(title="ChemWeave", version=__version__, docs_url=None,
                   redoc_url=None, lifespan=lifespan)
     app.state.workspace = workspace
+
+    @app.get("/api/single-event/path-example/{kind}")
+    def path_example(kind: str):
+        examples = {
+            "gas": ([{"smiles": "CCC"}, {"smiles": "[H]"}], ["path_h_abstraction"]),
+            "metal": ([{"smiles": "[H][H]"}, {"smiles": "[*:1]", "phase": "surface",
+                       "site_atoms": {"1": {"kind": "metal", "type": "Fe_model", "capacity": 1}}}],
+                      ["path_h2_adsorption"]),
+            "acid": ([{"smiles": "C=CC"}, {"smiles": "[*:1]O", "phase": "surface",
+                      "site_atoms": {"1": {"kind": "bronsted", "type": "ZSM5_model", "capacity": 1}}}],
+                     ["path_protonation"]),
+        }
+        if kind not in examples:
+            raise HTTPException(404, "Unknown path-counting example")
+        seeds, selected = examples[kind]
+        return {"seeds": seeds, "rules": [r.to_dict() for r in path_family_rules() if r.id in selected],
+                "config": {"max_carbon": 8, "max_depth": 1},
+                "single_event": {"calculator": "mapped_event_v1"}}
     static = Path(__file__).with_name("static")
     app.mount("/static", StaticFiles(directory=static), name="static")
 
@@ -109,11 +129,20 @@ def create_app(browser_url=None):
     def rules():
         return {"version": __version__, "rules": [r.to_dict() for r in load_rules()]}
 
+    @app.post("/api/rules/validate")
+    def validate_rules(records: list[dict]):
+        try:
+            if not records:
+                raise ValueError("Provide at least one mapped reaction template")
+            return {"rules": [ReactionRule(**record).to_dict() for record in records]}
+        except (ValueError, TypeError) as error:
+            raise HTTPException(422, str(error)) from error
+
     @app.get("/api/single-event/example")
     def single_event_example():
         rules = json.loads(files("chemweave").joinpath("data/single_event_rules.json").read_text(encoding="utf-8"))
         return {"seeds": [{"smiles": "C", "name": "Methane"}, {"smiles": "[H]", "name": "Hydrogen atom"}],
-                "rules": rules, "config": {"max_carbon": 1, "max_depth": 1}, "single_event": {}}
+                "rules": rules, "config": {"max_carbon": 1, "max_depth": 1}, "single_event": {"calculator": "methane_h_abstraction_v1"}}
 
     @app.post("/api/preview")
     def preview(record: SpeciesInput):
@@ -280,14 +309,18 @@ def create_app(browser_url=None):
                     "seeds": [
                         {"smiles": r["mapped_smiles"], "name": r.get("name", ""),
                          "phase": network.species[r["species_id"]].phase,
-                         "site": network.species[r["species_id"]].site}
+                         "site": network.species[r["species_id"]].site,
+                         "site_atoms": r.get("site_atoms", {})}
                         for r in network.seed_inputs
                     ] or [
                         {"smiles": network.species[sid].mapped_smiles,
                          "name": network.species[sid].name, "phase": network.species[sid].phase,
-                         "site": network.species[sid].site} for sid in network.seeds
+                         "site": network.species[sid].site,
+                         "site_atoms": network.species[sid].site_atoms} for sid in network.seeds
                     ],
-                    "targets": [{k: t.get(k) for k in ("smiles", "name", "phase", "site")} for t in network.targets],
+                    "targets": [{**{k: t.get(k) for k in ("name", "phase", "site")},
+                                 "smiles": t.get("mapped_smiles", t["smiles"]),
+                                 "site_atoms": t.get("site_atoms", {})} for t in network.targets],
                     "rules": network.rules, "config": network.config,
                     "single_event": network.single_event["options"] if network.single_event else None,
                 }

@@ -62,7 +62,7 @@ def test_single_event_example_annotation_export_and_restore(client):
     assert se['sigma_reactants'] == [12, 1] and se['sigma_ts'] == 3
     assert 'Independent single-event factor' in client.get('/static/app.js').text
     class_id = se['parameter_class']
-    options = {'parameters': {class_id: {'Ea': 42000, 'source': 'Illustrative fit input'}}}
+    options = {**request['single_event'], 'parameters': {class_id: {'Ea': 42000, 'source': 'Illustrative fit input'}}}
     updated = client.post('/api/single-event', json=options)
     assert updated.status_code == 200
     assert updated.json()['network']['single_event']['parameters'][class_id]['Ea'] == 42000
@@ -108,6 +108,33 @@ def test_generation_downloads_and_project_restore(client):
     assert raw.status_code == 200
     assert raw.json()['request']['seeds'][0]['name'] == 'propane'
     assert raw.json()['network'] == payload['network']
+
+
+@pytest.mark.parametrize('kind, expected', [('gas', [2, 6]), ('metal', [1]), ('acid', [1, 1])])
+def test_path_examples_sites_export_and_regeneration(client, kind, expected):
+    request = client.get('/api/single-event/path-example/' + kind).json()
+    for seed in request['seeds']:
+        assert client.post('/api/preview', json=seed).status_code == 200
+    assert client.post('/api/run', json=request).status_code == 202
+    assert finish(client)['status'] == 'finished'
+    payload = client.get('/api/network').json()
+    annotations = [c['single_event'] for r in payload['network']['reactions'] for c in r['channels']]
+    assert sorted(a['factor'] for a in annotations) == expected
+    assert all(a['method'] == 'reaction_path_degeneracy' for a in annotations)
+    if kind != 'gas':
+        assert any(s['site_atoms'] for s in payload['network']['species'])
+    with ZipFile(BytesIO(client.get('/api/export/csv').content)) as archive:
+        assert 'reaction_path_degeneracy' in archive.read('single_event.csv').decode('utf-8-sig')
+        assert 'site_atoms' in archive.read('species.csv').decode('utf-8-sig')
+    project = client.get('/api/export/project').json()
+    assert client.post('/api/new').status_code == 200
+    assert client.post('/api/open', json=project).json() == payload
+    restored = client.post('/api/open', json=payload['network']).json()
+    assert restored['network'] == payload['network']
+    assert client.post('/api/run', json=restored['request']).status_code == 202
+    assert finish(client)['status'] == 'finished'
+    regenerated = client.get('/api/network').json()['network']
+    assert regenerated['single_event'] == payload['network']['single_event']
 
 
 def test_targets_and_input_errors(client):
@@ -218,3 +245,39 @@ def test_pathway_analysis_can_be_stopped_without_discarding_network(client, monk
     after = client.get('/api/network').json()
     assert after['network'] == before
     assert after['analysis']['pathways'] == []
+
+
+@pytest.mark.parametrize('case_id', ['document_CH_homolysis', 'document_hydride_shift'])
+def test_user_templates_compute_without_family_or_recipe(client, case_id):
+    from pathlib import Path
+    cases = json.loads((Path(__file__).parent / 'data/path_cases.json').read_text())
+    case = next(c for c in cases if c['id'] == case_id)
+    template = {k: v for k, v in case['template'].items() if k not in {'family', 'kind'}}
+    checked = client.post('/api/rules/validate', json=[template])
+    assert checked.status_code == 200
+    assert checked.json()['rules'][0]['kind'] == 'elementary'
+    assert checked.json()['rules'][0]['family'] == 'unspecified'
+    request = {'seeds': case['reactants'], 'rules': [template],
+               'config': {'max_carbon': 10, 'max_depth': 1},
+               'single_event': {'calculator': 'mapped_event_v1'}}
+    assert client.post('/api/run', json=request).status_code == 202
+    assert finish(client)['status'] == 'finished'
+    payload = client.get('/api/network').json()
+    se = payload['network']['reactions'][0]['channels'][0]['single_event']
+    assert se['n_e'] == case['expected'][0]['factor']
+    assert se['algorithm'] == 'mapped_event_orbit_v1'
+    assert not {'parameter_class', 'rate_basis', 'A_units'} & se.keys()
+    assert payload['network']['single_event']['parameters'] == {}
+    with ZipFile(BytesIO(client.get('/api/export/csv').content)) as archive:
+        evidence = archive.read('single_event.csv').decode('utf-8-sig')
+        assert 'mapped_event_orbit_v1' in evidence and 'identical_reactant_divisor' in evidence
+    project = client.get('/api/export/project').json()
+    assert client.post('/api/new').status_code == 200
+    assert client.post('/api/open', json=project).json() == payload
+    raw = client.post('/api/open', json=payload['network']).json()
+    assert client.post('/api/run', json=raw['request']).status_code == 202
+    assert finish(client)['status'] == 'finished'
+    second = client.get('/api/network').json()['network']['reactions'][0]['channels'][0]['single_event']
+    assert second == se
+    assert client.post('/api/rules/validate', json=[]).status_code == 422
+    assert client.post('/api/rules/validate', json=[{'id': 'bad', 'smarts': 'bad'}]).status_code == 422

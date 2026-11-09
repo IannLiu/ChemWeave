@@ -5,6 +5,8 @@ import json
 
 from rdkit import Chem
 
+from .sites import site_label
+
 
 def prepare_reactants(species):
     """Give every atom a unique reaction-local map, retaining source labels.
@@ -54,6 +56,8 @@ def reaction_symmetry_key(reactants, products, reactant_states, product_states):
         for a in (atom, after[number]):
             descriptors.append((a.GetAtomicNum(), a.GetIsotope(), a.GetFormalCharge(),
                                 a.GetNumRadicalElectrons(), a.GetProp('_CIPCode') if a.HasProp('_CIPCode') else ""))
+            if site_label(a):
+                descriptors.append(("site", site_label(a)))
         atom_nodes[number] = len(labels)
         labels.append(("atom", *descriptors))
     for side, mols, states in (("reactant", reactants, reactant_states), ("product", products, product_states)):

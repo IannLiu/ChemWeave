@@ -1441,3 +1441,4 @@ dialog>div {
 }
 
 .single-event-details dd { overflow-wrap:anywhere; }
+.single-event-details pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:360px; overflow:auto; }

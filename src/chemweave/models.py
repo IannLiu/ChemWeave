@@ -6,13 +6,15 @@ import csv
 import json
 from pathlib import Path
 
-from rdkit import Chem
+from rdkit import Chem, rdBase
 from rdkit.Chem import rdMolDescriptors
+
+from .sites import set_site_atoms, site_identity, site_label
 
 
 @dataclass(frozen=True, slots=True)
 class Species:
-    """A molecular graph in a specified phase and optional single-site state.
+    """A molecular graph with phase, explicit catalyst nodes and a legacy site label.
 
     Use ``from_smiles`` or ``from_mol`` so the structure is standardized once.
     The name is a label; it does not contribute to chemical identity.
@@ -29,16 +31,19 @@ class Species:
     mapped_smiles: str = ""
     input_maps: tuple[tuple[int, int], ...] = ()
     symmetry_classes: tuple[tuple[int, int], ...] = ()
+    site_atoms: dict = field(default_factory=dict, compare=False)
+    _site_identity: str = field(default="", repr=False)
     _mol: Chem.Mol = field(repr=False, compare=False, hash=False, default=None)
     _mapped_mol: Chem.Mol = field(repr=False, compare=False, hash=False, default=None)
 
     @classmethod
-    def from_smiles(cls, smiles, *, name="", phase="gas", site=None):
+    def from_smiles(cls, smiles, *, name="", phase="gas", site=None, site_atoms=None):
         params = Chem.SmilesParserParams()
         params.removeHs = False
         mol = Chem.MolFromSmiles(smiles, params)
         if mol is None or mol.GetNumAtoms() == 0:
             raise ValueError(f"Invalid or empty molecular SMILES: {smiles!r}")
+        set_site_atoms(mol, site_atoms or {})
         return cls.from_mol(mol, name=name, phase=phase, site=site)
 
     @classmethod
@@ -61,18 +66,26 @@ class Species:
                 if atom.HasProp(prop):
                     atom.ClearProp(prop)
         Chem.AssignStereochemistry(mol, cleanIt=True, force=True)
+        identity = site_identity(mol, phase)
         mapped_smiles = Chem.MolToSmiles(mol, canonical=True, isomericSmiles=True)
-        ranks = Chem.CanonicalRankAtoms(mol, breakTies=False, includeAtomMaps=False)
+        ranked = Chem.Mol(mol)
+        labels = sorted({site_label(a) for a in mol.GetAtoms() if site_label(a)})
+        for a in ranked.GetAtoms():
+            if site_label(a):
+                a.SetIsotope(labels.index(site_label(a)) + 1)
+        ranks = Chem.CanonicalRankAtoms(ranked, breakTies=False, includeAtomMaps=False)
         symmetry_classes = tuple(sorted((a.GetAtomMapNum(), rank) for a, rank in zip(mol.GetAtoms(), ranks)))
         elements = Counter(a.GetSymbol() for a in mol.GetAtoms())
         structure = Chem.Mol(mol)
         for atom in structure.GetAtoms():
             atom.SetAtomMapNum(0)
-        structure = Chem.RemoveHs(structure)
+        with rdBase.BlockLogs():
+            structure = Chem.RemoveHs(structure)
         smiles = Chem.MolToSmiles(structure, canonical=True, isomericSmiles=True)
         # Reparse the canonical compact structure to give registry atoms a
         # consistent order and normalize bracketed versus implicit H counts.
-        structure = Chem.MolFromSmiles(smiles)
+        with rdBase.BlockLogs():
+            structure = Chem.MolFromSmiles(smiles)
         return cls(
             smiles=smiles,
             formula=rdMolDescriptors.CalcMolFormula(mol),
@@ -85,13 +98,15 @@ class Species:
             mapped_smiles=mapped_smiles,
             input_maps=tuple(sorted(input_maps)),
             symmetry_classes=symmetry_classes,
+            site_atoms={a.GetAtomMapNum(): json.loads(site_label(a)) for a in mol.GetAtoms() if site_label(a)},
+            _site_identity=identity,
             _mol=structure,
             _mapped_mol=mol,
         )
 
     @property
     def key(self):
-        return self.smiles, self.phase, self.site
+        return self.smiles, self.phase, self.site, self._site_identity
 
 
 @dataclass(slots=True)
@@ -143,12 +158,13 @@ class Network:
     def to_dict(self):
         """Return the persisted representation, shared by files and the web UI."""
         return {
-            "schema_version": 5,
+            "schema_version": 6,
             "species": [
                 {"id": sid, "smiles": s.smiles, "formula": s.formula,
                  "phase": s.phase, "site": s.site, "name": s.name,
                  "mapped_smiles": s.mapped_smiles, "input_maps": s.input_maps,
                  "symmetry_classes": s.symmetry_classes,
+                 "site_atoms": s.site_atoms,
                  "depth": self.species_depths.get(sid)}
                 for sid, s in self.species.items()
             ],
@@ -176,13 +192,14 @@ class Network:
     @classmethod
     def from_dict(cls, data):
         """Restore a saved network without requiring an intermediate file."""
-        if data["schema_version"] not in (1, 2, 3, 4, 5):
+        if data["schema_version"] not in (1, 2, 3, 4, 5, 6):
             raise ValueError(f"Unsupported network schema: {data['schema_version']}")
         species = {}
         for record in data["species"]:
             s = Species.from_smiles(
                 record.get("mapped_smiles", record["smiles"]), name=record["name"],
                 phase=record["phase"], site=record["site"],
+                site_atoms=record.get("site_atoms"),
             )
             if "input_maps" in record:
                 s = replace(s, input_maps=tuple(tuple(pair) for pair in record["input_maps"]))
@@ -221,10 +238,10 @@ class Network:
         directory.mkdir(parents=True, exist_ok=True)
         with (directory / "species.csv").open("w", encoding="utf-8-sig", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["id", "name", "smiles", "formula", "charge", "phase", "site", "mapped_smiles", "depth"])
+            writer.writerow(["id", "name", "smiles", "formula", "charge", "phase", "site", "mapped_smiles", "depth", "site_atoms"])
             for sid, s in self.species.items():
                 writer.writerow([sid, s.name, s.smiles, s.formula, s.charge, s.phase, s.site, s.mapped_smiles,
-                                 self.species_depths.get(sid)])
+                                 self.species_depths.get(sid), json.dumps(s.site_atoms)])
         with (directory / "reactions.csv").open("w", encoding="utf-8-sig", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(["id", "rule_id", "family", "kind", "reactants", "products", "template_matches", "channels", "depth"])
@@ -243,20 +260,27 @@ class Network:
             with (directory / "single_event.csv").open("w", encoding="utf-8-sig", newline="") as f:
                 writer = csv.writer(f)
                 writer.writerow(["reaction_id", "channel", "status", "kinetic_subclass", "parameter_class",
-                                 "factor", "sigma_reactants", "sigma_ts", "convention", "source", "reason", "reaction_center"])
+                                 "factor", "sigma_reactants", "sigma_ts", "convention", "source", "reason", "reaction_center",
+                                 "method", "family", "rate_basis", "kinetic_channel", "counting",
+                                 "n_e", "algorithm", "reason_code", "event", "unique_labeled_paths", "identical_reactant_divisor"])
                 for r in self.reactions:
                     for i, channel in enumerate(r.channels, 1):
                         se = channel.get("single_event", {})
                         writer.writerow([r.id, i, *[se.get(k) for k in ("status", "kinetic_subclass", "parameter_class", "factor")],
                                          json.dumps(se.get("sigma_reactants")), se.get("sigma_ts"),
                                          se.get("convention"), se.get("source"), se.get("reason"),
-                                         json.dumps(se.get("reaction_center"))])
+                                         json.dumps(se.get("reaction_center")),
+                                         *[se.get(k) for k in ("method", "family", "rate_basis", "kinetic_channel")],
+                                         json.dumps(se.get("counting")), se.get("n_e", se.get("factor")),
+                                         se.get("algorithm"), se.get("reason_code"), json.dumps(se.get("event")),
+                                         (se.get("counting") or {}).get("unique_labeled_paths"),
+                                         (se.get("counting") or {}).get("identical_reactant_divisor")])
             with (directory / "kinetic_parameters.csv").open("w", encoding="utf-8-sig", newline="") as f:
                 writer = csv.writer(f)
-                fields = ["A", "n", "Ea", "T_ref", "A_units", "Ea_units", "T_ref_units", "molecularity", "status", "source"]
+                fields = ["A", "n", "Ea", "T_ref", "A_units", "Ea_units", "T_ref_units", "molecularity", "status", "source", "rate_basis"]
                 writer.writerow(["parameter_class", *fields])
                 for class_id, record in self.single_event["parameters"].items():
-                    writer.writerow([class_id, *[record[k] for k in fields]])
+                    writer.writerow([class_id, *[record.get(k) for k in fields]])
         with (directory / "stoichiometry.csv").open("w", encoding="utf-8-sig", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(["reaction_id", "side", "species_id", "coefficient"])

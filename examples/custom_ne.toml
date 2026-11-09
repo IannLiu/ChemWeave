@@ -1,0 +1,13 @@
+# User template only: no extra factor recipe or family registration.
+rules = "custom_ne_rules.json"
+
+[[seeds]]
+smiles = "C"
+name = "Methane"
+
+[generation]
+max_carbon = 1
+max_depth = 1
+
+[single_event]
+calculator = "mapped_event_v1"

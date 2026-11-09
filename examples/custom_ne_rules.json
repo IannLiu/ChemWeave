@@ -1,0 +1,7 @@
+[
+  {
+    "id": "user_CH_homolysis",
+    "smarts": "[C;X4:1]-[#1:2]>>[C;H0:1].[#1;H0:2]",
+    "source": "Vandewiele 2015 p.187 Scheme 7; elementary by user declaration"
+  }
+]

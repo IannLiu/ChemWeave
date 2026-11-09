@@ -35,7 +35,7 @@ python -m pip install -e ".[web]"
 python -m chemweave web
 ```
 
-安装完成且对应环境已激活时，也可以使用等价命令 `chemweave web`。使用网页期间保持终端打开。浏览器会自动打开 `http://127.0.0.1:8765`；如果没有自动打开，可手动输入该地址。网页界面使用英文。输入初始物种 SMILES 和可选名称，勾选规则，设置碳数、深度后点击“Generate”（生成）。可添加目标物种来记录实验产物。“Stop when all targets are found”（找到所有目标后停止）默认开启；寻找替代生成途径时请关闭；展开各物种的“Phase and site”（相态与位点）可以设置对应状态。
+安装完成且对应环境已激活时，也可以使用等价命令 `chemweave web`。使用网页期间保持终端打开。浏览器会自动打开 `http://127.0.0.1:8765`；如果没有自动打开，可手动输入该地址。网页界面使用英文。输入初始物种 SMILES 和可选名称，勾选规则，设置碳数、深度后点击“Generate”（生成）。可添加目标物种来记录实验产物。“Stop when all targets are found”（找到所有目标后停止）默认开启；寻找替代生成途径时请关闭；展开各物种的“Phase and catalyst sites”（相态与催化位点）可以设置对应状态。
 
 中间图使用分子结构节点和独立的反应节点，边上显示非 1 的计量系数。点击节点可以查看物种或反应详情、切换映射通道、显示该反应实际保存的 atom-map 编号。可以搜索、按深度筛选或查看选中节点附近。超过 80 个物种时，默认显示到第 2 层，可通过深度选项展开。筛选后只显示包含全部反应物和共生成物的完整反应。运行期间更新统计信息，结束后绘制网络。
 
@@ -120,20 +120,21 @@ restored = Network.from_json("results/network.json")
 | `id` | 规则唯一名称；不同机理即使总反应相同，也可以使用不同规则 ID |
 | `smarts` | RDKit Reaction SMARTS，原子映射编号用于定义结构变化 |
 | `family` | 反应族标签 |
-| `kind` | 步骤性质，默认 `overall`；经机理审查后可标记为 `elementary` |
+| `kind` | 步骤性质，默认 `elementary`；按用户提供的基元反应处理，显式 `overall` 演示规则仍是总体反应 |
 | `version`、`source`、`notes` | 规则版本、依据和假设 |
 | `exclude_smarts` | 任一反应物命中其中一个模式时，不应用此规则 |
 | `reactant_phases`、`product_phases` | 按模板顺序指定各物种相态，默认全部为 `gas` |
-| `reactant_sites`、`product_sites` | 按模板顺序指定各物种单个位点标签，默认全部为 `null` |
+| `reactant_sites`、`product_sites` | 按模板顺序指定旧式物种级位点标签，默认全部为 `null` |
+| `site_constraints` | 按模板映射号约束显式催化节点属性；节点查询使用 `[#0]` |
 
 默认不自动反转规则。逆反应需要显式提供模板；某些双键迁移模板自身可以生成正反两个方向。规则被声明为 `elementary` 也不等于程序已经证明了它的机理。
 
 ## 网络如何扩展
 
-1. 标准化种子结构，以结构、相态和位点标签确定物种身份。
+1. 标准化种子结构，以结构、相态、旧式位点标签及显式催化节点属性确定物种身份。
 2. 每个新物种只与每条规则的各个反应物位置匹配一次。
 3. 将新加入候选池的物种与已有候选物种组合，执行尚未处理的有序反应物组合。允许同一物种占据两个位置，以表示自偶联。
-4. 用显式氢执行模板，恢复来源映射号，检查原子一一对应（包括元素和同位素）、电荷和位点标签数守恒。
+4. 用显式氢执行模板，恢复来源映射号，检查原子一一对应（包括元素和同位素）、电荷、旧式位点标签数，以及显式催化节点的守恒和容量。
 5. 按 `max_carbon` 筛选，并按规则 ID 和两侧计量合并重复反应。每种非等价映射只在 `channels` 中保存一个完整代表；等价执行仅累加其 `match_count`，不保留重复记录。
 6. 把新物种加入队列，直到队列耗尽或达到物种/反应预算。
 
@@ -143,11 +144,18 @@ restored = Network.from_json("results/network.json")
 
 ## 表面状态与 Single-event 的边界
 
-可以创建 `Species.from_smiles("C=CC", phase="surface", site="BAS")`。位点标签参与物种去重，反应规则可以限定输入和输出位点，并检查每类位点的数目守恒。
+物种可以包含显式映射的催化节点。物种 SMILES 中的 `[*:1]` 表示抽象位点；反应 SMARTS 必须用 `[#0:1]`，避免与匹配任意原子的通配符混淆。节点属性单独提供：
 
-这是**单个位点标签的抽象表示**，适合相同位点上有明确分子结构的变换。当前未提供空位、质子交换、双位点物种以及 Ga 催化循环的专门表示或内置规则。真实表面结构及其氢、电荷需要在进一步扩展机理时一致定义；给气相分子增加标签本身不能建立真实吸附机理。
+```python
+metal = Species.from_smiles("[*:1]", phase="surface",
+    site_atoms={1: {"kind": "metal", "type": "Fe_model", "capacity": 1}})
+acid = Species.from_smiles("[*:1]O", phase="surface",
+    site_atoms={1: {"kind": "bronsted", "type": "ZSM5_model", "capacity": 1}})
+```
 
-抽象位点标签不改变原子编号。比较反应通道时，相态和位点标签也参与等价性判断。
+抽象节点可为空位，或通过键级 1–4 的一条键连接一个原子；省略属性时默认为 kind `surface`、type `X`、capacity 1。多个节点表示多位点占用。Brønsted 酸模型包含真实 O–H 键和可转移的映射氢；质子转移后，框架 O− 与碳正离子作为一个表面关联物种保存。属性、吸附连接、同位素和电荷参与身份、匹配、映射、守恒与保存。该模型不描述晶格邻接、吸附取向或完整 Ga 循环。详细约定及文档案例见[计算与验证报告](docs/path_degeneracy.md)。
+
+旧式 `Species.from_smiles("C=CC", phase="surface", site="BAS")` 仍可用于通用带标签网络，但物种级标签不足以自动计算催化路径因子。网页展开 **Phase and catalyst sites** 后填写节点属性 JSON。保存时需要 JSON 或配套 `site_atoms`；仅靠紧凑 SMILES 不能恢复催化位点类型。
 
 ## 原子映射与对称性
 
@@ -175,7 +183,7 @@ print(seed.symmetry_classes)  # (map_number, symmetry_class) pairs
 
 这些是单步反应映射。编号属于物种代表或某次反应实例，并非全网唯一的原子身份。多步来源追踪需要连接各步映射，并将产物原子与物种库代表的原子对应起来，不能仅凭编号数值直接连接。通道数及 `match_count` 都不是 SEMK 简并度；独立因子和动力学参数共享由可选的 single-event 标注模块处理。本版本不拟合参数或求解速率、转化率和选择性。
 
-新的 JSON 导出使用第 5 版格式，保留精简后的通道代表、计数、编号、对称类别、种子输入、物种及反应深度和目标状态。第 3、4 版文件仍可读取；旧文件缺失的深度保持未知。读取第 2 版文件时，会将原始匹配和通道索引转换为精简表示。第 1 版文件仍可作为结构网络读取，其中不完整的旧来源记录不会保留为映射通道；不能从旧的不带编号结构中恢复来源映射。
+新的 JSON 导出使用第 6 版格式，保留精简后的通道代表、计数、编号、对称类别、种子输入、物种及反应深度和目标状态。第 3、4、5 版文件仍可读取；旧文件缺失的深度保持未知。读取第 2 版文件时，会将原始匹配和通道索引转换为精简表示。第 1 版文件仍可作为结构网络读取，其中不完整的旧来源记录不会保留为映射通道；不能从旧的不带编号结构中恢复来源映射。
 
 ## 深度与目标物种停止条件
 
@@ -307,7 +315,44 @@ DOT 导出不依赖 Graphviz；如已安装 Graphviz，可用 `dot -Tsvg results
 
 SEMK 是 ChemWeave 的一种用途。`Generator` 仍然生成通用的规则反应网络，不带动力学假设。可以在生成后调用 `annotate_single_events(network, ...)`，在 CLI 配置中加入 `[single_event]`，或在英文网页的 **Single-event annotation → Annotate after generation** 中启用。省略该选项时网络不带标注。默认四条演示规则仍是总体反应，不会获得基元 single-event 因子。
 
-首个验证族是正向气相 **H/D 原子 + 甲烷(H/D) → 双氢分子 + 甲基自由基**。基元规则单独放在 `src/chemweave/data/single_event_rules.json`；网页的 **Load methane validation example** 可以载入该例，不改变默认规则。对应 CLI 示例：
+`single_event.py` 是与反应族无关的框架，只负责中心提取、调用显式选择的计算器、接受导入因子及管理共享参数。默认不选择计算器：`annotate_single_events(network)` 只提取反应中心，不假定任何反应族或赋予因子。自动结构路径计数位于 `path_degeneracy.py`，可选示例模板位于 `data/path_families.json`，计数算法不读取这些模板。原有甲烷对称数示例仍单独保留在 `single_event_calculators.py`。
+
+替代计算方法可通过 `register_single_event_calculator(name, callback)` 注册，再用 `annotate_single_events(network, calculator=name)` 选择，无需修改核心模块。回调接收关键字参数 `network`、`reaction`、`channel`、`center`；不适用时返回 `None`，适用时返回字典，包含 `convention`、`source`，以及 `factor` 或 `sigma_reactants`/`sigma_ts`。可选的 `references`、`kinetic_subclass`、`parameter_class` 也会保留，但不是因子计算前提。具体化学条件及相态/位点检查属于计算器；通用层只检查和保存统一的因子/参数记录。导入记录优先于相应通道的计算结果。在新进程中重放自定义计算器的保存配置前，需要重新注册回调；可执行 Python 代码不会被序列化。
+
+### 自动反应路径因子
+
+选择 `calculator="mapped_event_v1"`（`path_degeneracy_v1` 保留为兼容名称）。计算器直接从完整映射基元反应提取断成键、原子状态变化和产物物种划分，在反应物图的对称变换下枚举等价事件。新增模板不需要第二套 recipe，也不需要内置反应族名称。保存方法为 **`reaction_path_degeneracy`**，算法为 **`mapped_event_orbit_v1`**；它是明确计数约定下的结构路径因子，不是三维转动对称数计算。
+
+```python
+from chemweave import GenerationConfig, Generator, ReactionRule, Species, annotate_single_events
+
+rule = ReactionRule(id="user_CH_homolysis",
+                    smarts="[C;X4:1]-[#1:2]>>[C;H0:1].[#1;H0:2]")
+network = Generator([rule], GenerationConfig(max_depth=1)).generate([Species.from_smiles("C")])
+annotate_single_events(network, calculator="mapped_event_v1")
+assert network.reactions[0].channels[0]["single_event"]["n_e"] == 4
+```
+
+纯函数 `calculate_path_factor(mapped_reactants, mapped_products, ...)` 接受完整映射、显式氢的物种 SMILES 列表。每个列表元素代表一个物种实例，包括作为整体保存的不连通关联物种。网络生成器会根据映射模板自动提供这些完整映射；可选相态/位点状态及显式节点属性用于保留催化环境差异。参数类别、共享参数、`rate_basis`、`A_units` 均不是前提；纯因子计算不创建参数类别或速率表达式。
+
+**计数约定：**枚举时保留不同反应物实例的身份；同一组编号原子上重复生成的事件先去重，得到 `N = unique_labeled_paths`，此时尚未商去相同反应物的交换。令 `D = product(m_i!)`，其中 `m_i` 是相同反应物物种的实例数，只修正一次：**`n_e = N / D`**。例如 H2 + 2 X → 2 XH 为 `2 / 2 = 1`，逆反应为 `1 / 2 = 0.5`。`match_count`、产物相同和已保存通道数均不能代替因子。保存的中间计数明确记录这一次修正。使用者负责在自己的动力学表达式中一致使用该因子，避免再次施加相同反应物除数。
+
+运行未列入内置反应族的新模板示例：
+
+```bash
+PYTHONPATH=src python -m chemweave generate \
+  --config examples/custom_ne.toml --output results/custom-ne
+```
+
+网页展开 **Custom templates (JSON)**，输入模板列表，点击 **Use these templates**；填写种子 SMILES（必要时指定相态/位点属性），勾选 **Annotate after generation**，保留配置 `{"calculator":"mapped_event_v1"}`，再点击 **Generate**。点击反应即可查看因子、状态、事件变化及路径数/除数。**Apply to current network** 也可标注已有映射网络。气相/金属/酸位示例只是快捷入口，不限制用户输入。
+
+算法不设 C/H、无环或反应族白名单。验证覆盖均裂、夺氢、歧化/复合、金属位点吸附/脱附/氢化，以及酸位质子转移、氢负离子迁移和 β 断裂，另检查含氧及环状输入。计算对象是输入的电子结构图，不自动枚举共振结构集合。已指定立体化学目前返回 `unsupported_algorithm`；映射不完整或缺少催化节点返回 `missing_information`；输入矛盾返回 `invalid_input`；计算超限返回 `incomplete`。这些状态均附原因且不填因子，仍可手动导入。抽象位点不隐含晶格、吸附取向或三维简并度。
+
+[实现与验证报告](docs/path_degeneracy.md)列出计数依据、11 个文档对应或明确标记为派生的案例、人工枚举、独立穷举交叉检查及固定 RMG 源码引用。**本地没有运行 RMG**。本路线不采用 2023 年加氢裂化论文的自由态抵消假设，也不声称与 Vandewiele 转动对称数约定普遍相等：甲基—乙基歧化的路径因子为 3，而该文对称数约定为 6。
+
+### 原有对称数比验证示例
+
+原有对称数验证族是正向气相 **H/D 原子 + 甲烷(H/D) → 双氢分子 + 甲基自由基**。基元规则单独放在 `src/chemweave/data/single_event_rules.json`；网页的 **Load methane validation example** 可以载入该例，不改变默认规则。对应 CLI 示例：
 
 ```bash
 PYTHONPATH=src python -m chemweave generate \
@@ -326,15 +371,15 @@ PYTHONPATH=src python -m chemweave generate \
 
 这些 H/D 结果来自上述理想几何及保持同位素的正旋转：Td 有 12 个、C3v 有 3 个、C2v 有 2 个、Cs 有 1 个。[NIST 对称数说明](https://cccbdb.nist.gov/thermox.asp) 介绍了相应约定；[NIST CCCBDB 第 8 号反应](https://cccbdb.nist.gov/ts2x.asp?ri=8) 收录 H + CH4 基元反应；[Hu 等，J. Phys. Chem. A 2006](https://web.stanford.edu/group/Zarelab/publinks/764.pdf) 描述了其 C3v 鞍点。同位素变体验证的是这一对称数约定，不是实验测得的动力学同位素效应。包中未提供拟合或从头算速率常数。
 
-每个映射通道新增 `single_event.reaction_center`：变化的化学键（含键级/立体信息）、变化的原子电荷/自由基/立体状态，以及参与变化的**本次反应局部映射号**。内置计算器检查完整的断成键/自由基变化及气相无位点条件，不依赖规则名称。请统一普通氢的标签：甲烷混用未指定同位素 H 与显式 1H 时不计算因子，因为 RDKit 会将其拆成不同通道。动力学子类包括碳同位素、转移同位素、夺氢原子同位素和旁观氢同位素组成，因此不同同位素环境不会自动共享拟合参数。不支持的基元反应族和总体反应仍保留中心，并明确标为 `unsupported`，不赋因子；没有映射通道的反应列在 `network.single_event["unmapped_reactions"]` 中。
+每个映射通道新增 `single_event.reaction_center`：变化的化学键（含键级/立体信息）、变化的原子电荷/自由基/立体状态，以及参与变化的**本次反应局部映射号**。甲烷对称数计算器检查完整的断成键/自由基变化及气相无位点条件，不依赖规则名称。请统一普通氢的标签：甲烷混用未指定同位素 H 与显式 1H 时不计算因子，因为 RDKit 会将其拆成不同通道。动力学子类包括碳同位素、转移同位素、夺氢原子同位素和旁观氢同位素组成，因此不同同位素环境不会自动共享拟合参数。不支持的基元反应族和总体反应仍保留中心，并明确标为 `unsupported`，不赋因子；没有映射通道的反应列在 `network.single_event["unmapped_reactions"]` 中。
 
-**`match_count` 和通道数均不参与 single-event 因子的计算。** 测试故意改变模板，使匹配次数从 4 变为 12，独立计算的因子仍为 4；提前停止导致的计数不完整也不影响对称数比。目前计算器只覆盖这一正向甲烷族；其他分子、表面状态和逆反应必须给出明确过渡态约定，或导入独立因子。
+**`match_count` 和通道数均不参与 single-event 因子的计算。** 测试故意改变模板，使匹配次数从 4 变为 12，独立计算的因子仍为 4；提前停止导致的计数不完整也不影响对称数比。这一旧对称数计算器只覆盖正向甲烷族；独立路径计算器的范围和归一化见上文，不能把它理解为对称数比算法的通用扩展。
 
 ```python
 from chemweave import Network, annotate_single_events
 
 network = Network.from_json("results/single-event/network.json")
-annotate_single_events(network)
+annotate_single_events(network, calculator="methane_h_abstraction_v1")
 channel = network.reactions[0].channels[0]
 print(channel["single_event"]["factor"])  # 4.0，来自 12 / 3
 class_id = channel["single_event"]["parameter_class"]
@@ -344,9 +389,9 @@ network.export_json("results/single-event/annotated.json")
 network.export_csv("results/single-event")
 ```
 
-通道引用 `parameter_class`，参数只在 `network.single_event["parameters"]` 中保存一份，所有引用相同类别的通道共用。固有 modified Arrhenius 约定为 `k_channel(T) = n_SE * A * (T/T_ref)^n * exp(-Ea/(R*T))`：Ea 单位 J/mol，T 和 T_ref 为 K（默认 T_ref = 1 K），R 为 J/(mol K)，A 为 `(m^3/mol)^(molecularity-1) s^-1`。A、n、Ea 在提供前保持空值；标注模块不执行拟合、不求值速率系数，也不判定拟合有效性。`status` 和 `source` 记录用户提供的参数状态与来源。此约定下应拟合已去除 single-event 因子的固有 A；若总体 A 已包含简并度，再乘因子会重复计数。平行通道的速率系数可按每个通道求和一次，不乘模板匹配次数。
+旧计算器和显式导入的参数记录仍保留可选共享参数支持：通道可以引用 `parameter_class`，参数仅在 `network.single_event["parameters"]` 中保存一份。只有存在参数类别时才保留原有 modified Arrhenius 表达式。通用路径计算器不创建这些记录，也不要求速率表达式、单位或拟合值；本模块不执行拟合或速率求值。
 
-其他基元反应族可以直接导入有限正因子，或提供反应物及 TS 对称数。若同时提供因子和对称数，比值必须一致。导入必须指定动力学子类、共享参数类、来源和约定。以下输入可用于上述甲烷示例，属于可复现的对称数输入，**不是实验拟合数据**：
+也可导入有限正因子，或通过反应物/TS 对称数比指定因子。导入需提供 `convention` 和 `source`；子类、共享参数类、`rate_basis`、`A_units` 均可省略。如果同时提供因子和对称数，两者必须一致。以下旧甲烷输入展示可选共享参数记录，**不是实验拟合数据**：
 
 ```json
 {
@@ -372,9 +417,9 @@ python -m chemweave annotate --network results/single-event/network.json \
   --annotations single-event.json --output results/annotated
 ```
 
-这些键同样适用于 `annotate_single_events(network, **options)` 和网页 **Factors and parameter classes (JSON)** 编辑区。**Apply to current network** 可以更新已载入的网络，无需重新生成。通道索引从 1 开始，只指向该保存网络中的记录；重新生成后应重新核对选择器。同一参数类不能混用不同分子数。内置计算器为每个动力学子类分配一个参数类；导入时可以明确指定其他共享关系。每次应用配置会替换旧标注和参数记录，因此需要保留的导入因子及参数值也应包含在配置中。`calculator: null` 关闭自动因子计算，仍提取反应中心。
+这些键同样适用于 `annotate_single_events(network, **options)` 和网页 **Calculation options and imported factors (JSON)** 编辑区。**Apply to current network** 可以更新已载入的网络，无需重新生成。通道索引从 1 开始，只指向该保存网络中的记录；重新生成后应重新核对选择器。同一参数类不能混用不同分子数、速率基准或单位。原有甲烷计算器分配参数类别，通用路径计算器不分配。每次应用配置会替换旧标注和参数记录，因此需要保留的导入因子及参数值也应包含在配置中。`calculator: null`（省略时也是这一默认行为）关闭自动因子计算，仍提取反应中心。网页验证按钮会显式填入甲烷计算器；空配置对象不选择反应族。`annotate` 命令未提供配置文件时也只提取中心。
 
-网络 JSON 第 5 版及网页项目文件保留中心、子类/共享参数类引用、独立因子、约定、来源、共享参数记录和可复现的标注配置。第 1–4 版仍可读取；缺少完整映射的旧记录在获得可用映射前不会被推断赋因子。仅在应用标注后，CSV 导出增加 **`single_event.csv`**（每个映射通道一条，包括不支持状态及中心）与 **`kinetic_parameters.csv`**（每个共享参数类一条）；原有 CSV 列保持不变。英文网页的反应详情可切换通道，查看中心、独立因子、对称数/过渡态约定、动力学子类、共享参数类以及已提供或待拟合的参数值。Save/Open 与 JSON/CSV 下载保留相同数据。
+网络 JSON 第 6 版及网页项目文件保留中心、子类/共享参数类引用、独立因子、约定、来源、共享参数记录和可复现的标注配置。第 1–5 版仍可读取；缺少完整映射的旧记录在获得可用映射前不会被推断赋因子。仅在应用标注后，CSV 导出增加 **`single_event.csv`**（每个映射通道一条，包括不支持状态及中心）与 **`kinetic_parameters.csv`**（每个共享参数类一条）；`species.csv` 追加 `site_atoms`，标注导出追加 `n_e`、方法、算法、反应族、状态/原因、提取的事件、动力学通道、编号路径数及相同反应物除数，原有列保留。英文网页的反应详情可切换通道，查看中心、独立因子、对称数/过渡态约定、动力学子类、共享参数类以及已提供或待拟合的参数值。Save/Open 与 JSON/CSV 下载保留相同数据。
 
 ## Python 中的进度与用户停止
 
@@ -382,7 +427,7 @@ python -m chemweave annotate --network results/single-event/network.json \
 
 ## 后续扩展
 
-先用带来源和适用条件的规则逐步补齐裂解、支化、环化和芳烃生成路径，再比较提高碳数上限后的变化。随后根据选定的表面机理加入空位和催化剂状态表示，用实验数据拟合可选的 single-event 共享参数，再作为独立应用接入动力学求解。
+先用带来源和适用条件的规则逐步补齐裂解、支化、环化和芳烃生成路径，再比较提高碳数上限后的变化。因子算法可继续扩展图立体化学与共振处理；实验拟合与动力学求解属于独立应用，不属于本次范围。
 
 ## 参考
 

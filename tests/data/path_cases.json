@@ -1,0 +1,334 @@
+[
+  {
+    "id": "methane_H",
+    "rule": "path_h_abstraction",
+    "reactants": [
+      {
+        "smiles": "C"
+      },
+      {
+        "smiles": "[H]"
+      }
+    ],
+    "expected": [
+      {
+        "paths": 4,
+        "divisor": 1,
+        "factor": 4
+      }
+    ],
+    "source": "Vandewiele 2015 p.187 Scheme 8",
+    "manual_count": "Four different C-H bonds. Spectator permutations are not paths.",
+    "derived": false
+  },
+  {
+    "id": "methyl_ethyl_disproportionation",
+    "rule": "path_disproportionation",
+    "reactants": [
+      {
+        "smiles": "[CH3]"
+      },
+      {
+        "smiles": "[CH2]C"
+      }
+    ],
+    "expected": [
+      {
+        "paths": 3,
+        "divisor": 1,
+        "factor": 3
+      }
+    ],
+    "source": "Vandewiele 2015 p.189 Table 4, Radical disproportionation",
+    "manual_count": "Three beta-H atoms in ethyl transfer to methyl. Paper rotational-symmetry factor 6 uses a different normalization; this path factor is 3, not a reproduction of 6.",
+    "derived": false
+  },
+  {
+    "id": "ethyl_self_disproportionation",
+    "rule": "path_disproportionation",
+    "reactants": [
+      {
+        "smiles": "[CH2]C"
+      },
+      {
+        "smiles": "[CH2]C"
+      }
+    ],
+    "expected": [
+      {
+        "paths": 6,
+        "divisor": 2,
+        "factor": 3
+      }
+    ],
+    "source": "Derived identical-reactant test from the preceding disproportionation family",
+    "manual_count": "Either labelled ethyl is donor; three beta-H choices each: 2*3=6 labelled outcomes; divide once by 2!.",
+    "derived": true
+  },
+  {
+    "id": "H2_adsorption_two_sites",
+    "rule": "path_h2_adsorption",
+    "reactants": [
+      {
+        "smiles": "[H][H]"
+      },
+      {
+        "smiles": "[*:1]",
+        "phase": "surface",
+        "site_atoms": {
+          "1": {
+            "kind": "metal",
+            "type": "Fe_model",
+            "capacity": 1
+          }
+        }
+      },
+      {
+        "smiles": "[*:1]",
+        "phase": "surface",
+        "site_atoms": {
+          "1": {
+            "kind": "metal",
+            "type": "Fe_model",
+            "capacity": 1
+          }
+        }
+      }
+    ],
+    "expected": [
+      {
+        "paths": 2,
+        "divisor": 2,
+        "factor": 1
+      }
+    ],
+    "source": "Lozano-Blanco et al. 2011 p.427 Table 2 reaction (1)",
+    "manual_count": "H_a-X_1/H_b-X_2 and H_a-X_2/H_b-X_1 are two labelled outcomes. Four executions from site-slot and H swaps collapse to two, then divide by 2! identical vacant occurrences. No lattice coordination multiplier.",
+    "derived": false
+  },
+  {
+    "id": "H2_desorption_two_adsorbates",
+    "rule": "path_h2_desorption",
+    "reactants": [
+      {
+        "smiles": "[*:1][H]",
+        "phase": "surface",
+        "site_atoms": {
+          "1": {
+            "kind": "metal",
+            "type": "Fe_model",
+            "capacity": 1
+          }
+        }
+      },
+      {
+        "smiles": "[*:1][H]",
+        "phase": "surface",
+        "site_atoms": {
+          "1": {
+            "kind": "metal",
+            "type": "Fe_model",
+            "capacity": 1
+          }
+        }
+      }
+    ],
+    "expected": [
+      {
+        "paths": 1,
+        "divisor": 2,
+        "factor": 0.5
+      }
+    ],
+    "source": "Lozano-Blanco et al. 2011 p.427 Table 2 reaction (1), reverse",
+    "manual_count": "One labelled outcome creates H_a-H_b and frees both nodes; swapped template executions are identical. The identical-particle event-rate convention still divides by 2!, without quotienting the atom labels. MH loss is 2*r_event.",
+    "derived": false
+  },
+  {
+    "id": "metal_ethyl_hydrogenation",
+    "rule": "path_alkyl_hydrogenation",
+    "reactants": [
+      {
+        "smiles": "[*:1]CC",
+        "phase": "surface",
+        "site_atoms": {
+          "1": {
+            "kind": "metal",
+            "type": "Fe_model",
+            "capacity": 1
+          }
+        }
+      },
+      {
+        "smiles": "[*:1][H]",
+        "phase": "surface",
+        "site_atoms": {
+          "1": {
+            "kind": "metal",
+            "type": "Fe_model",
+            "capacity": 1
+          }
+        }
+      }
+    ],
+    "expected": [
+      {
+        "paths": 1,
+        "divisor": 1,
+        "factor": 1
+      }
+    ],
+    "source": "Lozano-Blanco et al. 2011 p.427 Table 2 reaction (8), n=2",
+    "manual_count": "One C-metal bond and one H-metal bond break; one C-H bond forms. Different adsorbates: no identical-reactant divisor.",
+    "derived": false
+  },
+  {
+    "id": "propene_acid_protonation",
+    "rule": "path_protonation",
+    "reactants": [
+      {
+        "smiles": "[*:1]O",
+        "phase": "surface",
+        "site_atoms": {
+          "1": {
+            "kind": "bronsted",
+            "type": "ZSM5_model",
+            "capacity": 1
+          }
+        }
+      },
+      {
+        "smiles": "C=CC"
+      }
+    ],
+    "expected": [
+      {
+        "paths": 1,
+        "divisor": 1,
+        "factor": 1
+      },
+      {
+        "paths": 1,
+        "divisor": 1,
+        "factor": 1
+      }
+    ],
+    "source": "Aromatization summary, MTO Figure 1 (H+ + C3=); Wang 2023 p.125 Table 2 (De)protonation",
+    "manual_count": "One explicit O-H proton can attach at either inequivalent alkene carbon; distinct primary/secondary cations remain separate channels/classes. Framework O becomes negative in a surface-associated ion pair.",
+    "derived": false
+  },
+  {
+    "id": "isopropyl_acid_deprotonation",
+    "rule": "path_deprotonation",
+    "reactants": [
+      {
+        "smiles": "[*:1][O-].C[CH+]C",
+        "phase": "surface",
+        "site_atoms": {
+          "1": {
+            "kind": "bronsted",
+            "type": "ZSM5_model",
+            "capacity": 1
+          }
+        }
+      }
+    ],
+    "expected": [
+      {
+        "paths": 6,
+        "divisor": 1,
+        "factor": 6
+      }
+    ],
+    "source": "Aromatization summary, MTO Figure 1 (C3+ to H+ + C3=), explicit framework model",
+    "manual_count": "Two equivalent methyl groups times three H choices = six labelled paths. Framework O- accepts H; no independent-molecule factorial.",
+    "derived": false
+  },
+  {
+    "id": "document_beta_scission",
+    "rule": "path_beta_scission",
+    "reactants": [
+      {
+        "smiles": "[*:1][O-].C[CH+]C(C)C(C)C",
+        "phase": "surface",
+        "site_atoms": {
+          "1": {
+            "kind": "bronsted",
+            "type": "ZSM5_model",
+            "capacity": 1
+          }
+        }
+      }
+    ],
+    "expected": [
+      {
+        "paths": 1,
+        "divisor": 1,
+        "factor": 1
+      }
+    ],
+    "source": "Wang 2023 pp.128-129 Figures 7-8: 3,4-dimethyl-2-pentyl carbenium beta-scission",
+    "manual_count": "One qualifying C3-C4 bond cleavage coupled to C2=C3 formation; secondary/tertiary leaving carbenium scope. Framework association retained. Constitutional graph model, no surface orientation multiplicity.",
+    "derived": false
+  },
+  {
+    "id": "document_CH_homolysis",
+    "template": {
+      "id": "user_CH_homolysis",
+      "family": "User_homolysis",
+      "smarts": "[C;X4:1]-[#1:2]>>[C;H0:1].[#1;H0:2]"
+    },
+    "reactants": [
+      {
+        "smiles": "C"
+      }
+    ],
+    "expected": [
+      {
+        "paths": 4,
+        "divisor": 1,
+        "factor": 4
+      }
+    ],
+    "source": "Vandewiele 2015 p.187 Scheme 7: methane C-H homolysis",
+    "manual_count": "Choose one of four equivalent C-H bonds; one reactant, no factorial. New user template, absent from bundled recipes.",
+    "derived": false
+  },
+  {
+    "id": "document_hydride_shift",
+    "template": {
+      "id": "user_hydride_shift",
+      "family": "User_hydride_shift",
+      "smarts": "([#0:1]-[O-:2].[C+;X3:3]-[C;X4;+0;$(C(-C)(-C)-C):4]-[#1:5])>>([#0:1]-[O-:2].[C;H0;+0:3](-[#1:5])-[C+;H0:4])",
+      "reactant_phases": [
+        "surface"
+      ],
+      "product_phases": [
+        "surface"
+      ]
+    },
+    "reactants": [
+      {
+        "smiles": "[*:1][O-].CC(C)[CH+]CCCC",
+        "phase": "surface",
+        "site_atoms": {
+          "1": {
+            "kind": "bronsted",
+            "type": "ZSM5_model",
+            "capacity": 1
+          }
+        }
+      }
+    ],
+    "expected": [
+      {
+        "paths": 1,
+        "divisor": 1,
+        "factor": 1
+      }
+    ],
+    "source": "Wang 2023 p.125 Table 2 hydride-shift example: 2-methylheptan-3-yl cation to 2-methylheptan-2-yl cation; explicit framework association",
+    "manual_count": "One H on the tertiary carbon adjacent to the cation transfers; break donor C-H and form acceptor C-H, move + charge to donor. New user template, absent from bundled recipes.",
+    "derived": false
+  }
+]

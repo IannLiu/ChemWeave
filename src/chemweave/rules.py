@@ -11,6 +11,7 @@ from rdkit.Chem import rdChemReactions
 
 from .models import Species
 from .mapping import prepare_reactants, reaction_symmetry_key
+from .sites import SITE_PROPERTY, site_label
 
 
 @dataclass(slots=True)
@@ -18,7 +19,7 @@ class ReactionRule:
     id: str
     smarts: str
     family: str = "unspecified"
-    kind: str = "overall"
+    kind: str = "elementary"
     version: str = "1"
     source: str = ""
     notes: str = ""
@@ -27,6 +28,7 @@ class ReactionRule:
     product_phases: tuple[str, ...] = ()
     reactant_sites: tuple[str | None, ...] = ()
     product_sites: tuple[str | None, ...] = ()
+    site_constraints: dict = field(default_factory=dict)
     _reaction: object = field(init=False, repr=False)
     _exclusions: tuple = field(init=False, repr=False)
     _template_sources: dict = field(init=False, repr=False)
@@ -42,6 +44,13 @@ class ReactionRule:
             for slot, mol in enumerate(self._reaction.GetReactants()) for atom in mol.GetAtoms()
             if atom.GetAtomMapNum()
         }
+        self.site_constraints = {int(k): dict(v) for k, v in self.site_constraints.items()}
+        for number in self.site_constraints:
+            if number not in self._template_sources:
+                raise ValueError("Site constraints must refer to mapped reactant-template atoms")
+            atom = next(a for m in self._reaction.GetReactants() for a in m.GetAtoms() if a.GetAtomMapNum() == number)
+            if "AtomAtomicNum 0" not in atom.DescribeQuery():
+                raise ValueError("Catalytic template nodes must use [#0], not the SMARTS wildcard '*'")
         nr = self._reaction.GetNumReactantTemplates()
         np = self._reaction.GetNumProductTemplates()
         for attr, size, default in (
@@ -62,11 +71,18 @@ class ReactionRule:
         return self._reaction.GetNumReactantTemplates()
 
     def matches(self, species, slot):
+        template = self._reaction.GetReactantTemplate(slot)
+        constrained = [(a.GetIdx(), self.site_constraints[a.GetAtomMapNum()]) for a in template.GetAtoms()
+                       if a.GetAtomMapNum() in self.site_constraints]
         return (
             species.phase == self.reactant_phases[slot]
             and species.site == self.reactant_sites[slot]
             and species._mapped_mol.HasSubstructMatch(self._reaction.GetReactantTemplate(slot), useChirality=True)
             and not any(species._mapped_mol.HasSubstructMatch(p) for p in self._exclusions)
+            and (not constrained or any(all(
+                all(json.loads(site_label(species._mapped_mol.GetAtomWithIdx(match[idx])) or "{}").get(k) == v
+                    for k, v in attrs.items()) for idx, attrs in constrained)
+                for match in species._mapped_mol.GetSubstructMatches(template, uniquify=False, useChirality=True, maxMatches=0)))
         )
 
     def apply(self, reactants, rejected):
@@ -117,6 +133,13 @@ class ReactionRule:
                         valid = False
                         break
                     atom.SetAtomMapNum(number)
+                    constraint = self.site_constraints.get(props.get("old_mapno"), {})
+                    metadata = json.loads(site_label(source) or "{}")
+                    if any(metadata.get(k) != v for k, v in constraint.items()):
+                        valid = False
+                        break
+                    if site_label(source):
+                        atom.SetProp(SITE_PROPERTY, site_label(source))
                     numbers.append(number)
                     properties.append({**props, "map_num": number})
                 atom_properties.append(properties)
@@ -128,10 +151,14 @@ class ReactionRule:
             if left_charge != sum(Chem.GetFormalCharge(m) for m in product_mols) or left_sites != right_sites:
                 rejected["unbalanced"] += 1
                 continue
-            products = tuple(
-                Species.from_mol(mol, phase=self.product_phases[i], site=self.product_sites[i])
-                for i, mol in enumerate(product_mols)
-            )
+            try:
+                products = tuple(
+                    Species.from_mol(mol, phase=self.product_phases[i], site=self.product_sites[i])
+                    for i, mol in enumerate(product_mols)
+                )
+            except ValueError:
+                rejected["site_state"] += 1
+                continue
             mapped_products = [Chem.MolToSmiles(mol) for mol in product_mols]
             mapped_reaction = ".".join(mapped_reactants) + ">>" + ".".join(mapped_products)
             if mapped_reaction not in symmetry_keys:
@@ -145,6 +172,7 @@ class ReactionRule:
                 "atom_mapping": origins,
                 "product_atom_properties": atom_properties,
                 "symmetry_key": symmetry_keys[mapped_reaction],
+                "site_atoms": {n: json.loads(site_label(a)) for n, a in sources.items() if site_label(a)},
             }
 
     def to_dict(self):
@@ -153,6 +181,7 @@ class ReactionRule:
                 "id", "smarts", "family", "kind", "version", "source", "notes",
                 "exclude_smarts", "reactant_phases", "product_phases",
                 "reactant_sites", "product_sites",
+                "site_constraints",
             )
         }
 

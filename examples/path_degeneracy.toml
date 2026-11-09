@@ -1,0 +1,20 @@
+# Lozano-Blanco 2011, p.427 Table 2 (1): H2 + 2 M -> 2 MH.
+# One seed site species can occupy two independent reactant slots.
+rules = "../src/chemweave/data/path_families.json"
+
+[[seeds]]
+smiles = "[H][H]"
+name = "Hydrogen"
+
+[[seeds]]
+smiles = "[*:1]"
+name = "Vacant abstract metal site"
+phase = "surface"
+site_atoms = {"1" = {kind = "metal", type = "Fe_model", capacity = 1}}
+
+[generation]
+max_carbon = 6
+max_depth = 1
+
+[single_event]
+calculator = "mapped_event_v1"

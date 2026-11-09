@@ -53,6 +53,7 @@ class Generator:
             target_records.setdefault(target.key, {
                 "smiles": target.smiles, "phase": target.phase, "site": target.site,
                 "name": target.name, "species_id": None,
+                "mapped_smiles": target.mapped_smiles, "site_atoms": target.site_atoms,
             })
         network.targets = list(target_records.values())
         remaining_targets = set(target_records)
@@ -74,6 +75,7 @@ class Generator:
             network.seed_inputs.append({
                 "species_id": identities[species.key], "mapped_smiles": species.mapped_smiles,
                 "input_maps": species.input_maps, "name": species.name,
+                "site_atoms": species.site_atoms,
             })
         if progress is not None:
             progress(network)
