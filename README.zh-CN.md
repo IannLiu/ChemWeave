@@ -2,11 +2,30 @@
 
 # ChemWeave
 
-ChemWeave 是一个基于用户自定义 RDKit 反应模板的通用 Python 反应网络探索工具。输入初始物种、带映射的基元反应模板和搜索范围，即可生成网络、检查原子映射、追踪物种生成路径，并保存或导出结果。反应规则与生成算法分开维护，便于探索不同反应体系、比较不同模板集合产生的网络。
+给定初始物种和反应模板，ChemWeave 帮你探索反应网络如何展开。你可以在本地网页或 Python 中生成网络、查看原子映射、追踪产物生成路径并保存结果。它也能自动计算 **single-event kinetics 使用的反应路径因子 `n_e`**，支持气相反应和抽象催化位点模型。
 
-反应网络探索是核心流程。可选的 single-event 标注可以从完整映射反应计算结构反应路径因子（`n_e`），也可以接受导入因子；SEMK 是其中一种用途，不限定软件的整体定位。软件按用户提供的基元反应处理输入，具体机理及模板适用条件由用户定义。
+## 目录
 
-内置示例演示气相与催化模板共同使用：烷烃脱氢、烯烃双键迁移、端烯烃偶联、烯烃裂解，以及显式金属位点上的 H₂ 吸附。它们用于说明模板匹配、原子映射、网络扩展及可选路径因子计算。用户可以替换或扩展这些模板，探索自己的反应体系。
+- [安装与测试](#installation)
+- [网页界面](#web-interface)
+- [Python 接口](#python-api)
+- [自定义规则](#custom-templates)
+- [网络如何扩展](#network-expansion)
+- [表面状态与 Single-event 的边界](#catalyst-sites)
+- [原子映射与对称性](#atom-mapping)
+- [深度与目标物种停止条件](#search-limits)
+- [目标产物生成途径](#formation-pathways)
+- [命令行与输出](#cli-and-outputs)
+- [Single-event kinetics：计算 n_e](#single-event-kinetics)
+  - [自动计算 n_e](#automatic-ne)
+  - [气相与催化模板共同运行的示例](#combined-example)
+  - [独立催化示例：H₂ 在金属位点上解离吸附](#catalytic-example)
+  - [原有对称数比验证示例](#symmetry-example)
+- [Python 中的进度与用户停止](#progress-and-stop)
+- [后续扩展](#development)
+- [参考](#references)
+
+<a id="installation"></a>
 
 ## 安装与测试
 
@@ -21,12 +40,14 @@ python -m pytest -q
 
 pytest 作为可选开发依赖声明在 `.[test]` 中。需要一起安装时，可运行 `python -m pip install -e ".[test]"`；已有 pytest 的环境可以使用上面的命令。
 
-在 macOS/Linux 中，不安装时也可以在项目目录直接运行：
+在 macOS/Linux 中，已有 Python 和 RDKit 环境时，可以直接从项目源码运行，无需另行安装 ChemWeave：
 
 ```bash
 PYTHONPATH=src python -m chemweave generate \
   --config examples/propane.toml --output results/propane
 ```
+
+<a id="web-interface"></a>
 
 ## 网页界面
 
@@ -75,6 +96,8 @@ python -m venv .venv-web
 
 后台使用 [FastAPI](https://fastapi.tiangolo.com/) 和 Uvicorn；分子 SVG 由 RDKit 绘制。[Cytoscape.js](https://js.cytoscape.org/) 3.34.4 及 MIT 许可证已随包提供，运行时不连接 CDN，不需要 Node.js 或前端构建。Python 接口和命令行生成仍可在未安装网页依赖时使用。
 
+<a id="python-api"></a>
+
 ## Python 接口
 
 ```python
@@ -96,6 +119,8 @@ restored = Network.from_json("results/network.json")
 `load_rules()` 读取内置示例；`load_rules("my_rules.json")` 读取自己的规则文件。`Species` 使用 `from_smiles` 或 `from_mol` 创建，以统一结构、分子式和唯一标识。
 
 在 base 环境（Python 3.12、RDKit 2026.03.6）运行 C6 示例得到 22 个物种、45 条反应和 45 个对称归并通道。这个数字是运行示例，不作为化学正确性的判据。
+
+<a id="custom-templates"></a>
 
 ## 自定义规则
 
@@ -131,6 +156,8 @@ restored = Network.from_json("results/network.json")
 
 默认不自动反转规则。逆反应需要显式提供模板；某些双键迁移模板自身可以生成正反两个方向。规则被声明为 `elementary` 也不等于程序已经证明了它的机理。
 
+<a id="network-expansion"></a>
+
 ## 网络如何扩展
 
 1. 标准化种子结构，以结构、相态、旧式位点标签及显式催化节点属性确定物种身份。
@@ -143,6 +170,8 @@ restored = Network.from_json("results/network.json")
 检查放在输入读取和候选反应生成处；正常枚举不重复校验整张网络。分子描述和反应模板在创建时处理一次。当前枚举不估算能垒或通量，也不会仅因某个物种未在实验中检出就删除它。
 
 `max_carbon` 对每个物种生效，种子也必须处于这个范围内。它定义本次网络的范围，不表示范围外路径在实际体系中不重要。
+
+<a id="catalyst-sites"></a>
 
 ## 表面状态与 Single-event 的边界
 
@@ -158,6 +187,8 @@ acid = Species.from_smiles("[*:1]O", phase="surface",
 抽象节点可为空位，或通过键级 1–4 的一条键连接一个原子；省略属性时默认为 kind `surface`、type `X`、capacity 1。多个节点表示多位点占用。Brønsted 酸模型包含真实 O–H 键和可转移的映射氢；质子转移后，框架 O− 与碳正离子作为一个表面关联物种保存。属性、吸附连接、同位素和电荷参与身份、匹配、映射、守恒与保存。晶格邻接和吸附取向不在这一抽象图模型的范围内。详细约定及文档案例见[计算与验证报告](docs/path_degeneracy.md)。
 
 旧式 `Species.from_smiles("C=CC", phase="surface", site="BAS")` 仍可用于通用带标签网络，但物种级标签不足以自动计算催化路径因子。网页展开 **Phase and catalyst sites** 后填写节点属性 JSON。保存时需要 JSON 或配套 `site_atoms`；仅靠紧凑 SMILES 不能恢复催化位点类型。
+
+<a id="atom-mapping"></a>
 
 ## 原子映射与对称性
 
@@ -186,6 +217,8 @@ print(seed.symmetry_classes)  # (map_number, symmetry_class) pairs
 这些是单步反应映射。编号属于物种代表或某次反应实例，并非全网唯一的原子身份。多步来源追踪需要连接各步映射，并将产物原子与物种库代表的原子对应起来，不能仅凭编号数值直接连接。通道数及 `match_count` 都不是 SEMK 简并度；独立因子和动力学参数共享由可选的 single-event 标注模块处理。本版本不拟合参数或求解速率、转化率和选择性。
 
 新的 JSON 导出使用第 6 版格式，保留精简后的通道代表、计数、编号、对称类别、种子输入、物种及反应深度和目标状态。第 3、4、5 版文件仍可读取；旧文件缺失的深度保持未知。读取第 2 版文件时，会将原始匹配和通道索引转换为精简表示。第 1 版文件仍可作为结构网络读取，其中不完整的旧来源记录不会保留为映射通道；不能从旧的不带编号结构中恢复来源映射。
+
+<a id="search-limits"></a>
 
 ## 深度与目标物种停止条件
 
@@ -238,6 +271,8 @@ max_depth = 4
 
 目标达成后，程序保存当前接受的完整反应、全部共生成物和满足条件的通道映射，随即返回。尚未遍历的匹配、通道和替代路径不会继续枚举，因此匹配计数可能不完整。这样的部分网络受种子和规则的枚举顺序影响，不表示已收集所有最短路径。
 
+<a id="formation-pathways"></a>
+
 ## 目标产物生成途径
 
 生成或打开网络后，在左侧 **Formation pathways**（生成途径）中选择产物，设置 **Max reactions per route**（每条途径的最大反应数）和 **Max pathways**（最多返回的途径数），点击 **Analyze formation**。也可以在物种详情中直接点击 **Analyze formation**。为收集替代途径，生成网络前应关闭 **Stop when all targets are found**。分析只使用已有网络，不会继续扩展此前提前停止的网络。
@@ -278,6 +313,8 @@ python -m chemweave pathways --network results/network.json --target S00008 --ma
 - `termination="exhausted"` 表示在**当前保存的网络和途径反应数上限内**完成枚举。`max_pathways` 表示触及数量上限，未确认枚举完整；`user_stopped` 表示用户停止。搜索依照保存的反应顺序，不是最短途径或动力学排序。
 - 只有原网络因 `exhausted` 或 `max_depth` 停止时，`network_search_complete` 才为真，且仅相对于其规则与配置范围。目标提前停止、物种/反应数量上限和用户停止均可能遗漏替代途径，即使途径枚举本身完成也一样。网页分别提示网络搜索和途径枚举的完整性。
 
+<a id="cli-and-outputs"></a>
+
 ## 命令行与输出
 
 安装后可运行：
@@ -313,7 +350,9 @@ DOT 导出不依赖 Graphviz；如已安装 Graphviz，可用 `dot -Tsvg results
 
 网络穷尽、达到深度边界或找到全部目标时，命令行在**没有缺失目标**的前提下返回退出码 0。数量预算中止、用户停止或仍缺失目标时返回 2，结果仍会保存。输入错误由 Python/RDKit 报告。
 
-## 可选的 single-event 标注
+<a id="single-event-kinetics"></a>
+
+## Single-event kinetics：计算 n_e
 
 SEMK 是 ChemWeave 的一种用途。`Generator` 仍然生成通用的规则反应网络，不带动力学假设。可以在生成后调用 `annotate_single_events(network, ...)`，在 CLI 配置中加入 `[single_event]`，或在英文网页的 **Single-event annotation → Annotate after generation** 中启用。省略该选项时网络不带标注。所有输入的映射步骤（包括默认五条示例）均可进入路径因子计算。旧项目中的 `kind="overall"` 历史标记不再阻止计算；对旧项目重新应用标注即可替换原来的跳过结果，无需重新生成网络。
 
@@ -321,7 +360,9 @@ SEMK 是 ChemWeave 的一种用途。`Generator` 仍然生成通用的规则反�
 
 替代计算方法可通过 `register_single_event_calculator(name, callback)` 注册，再用 `annotate_single_events(network, calculator=name)` 选择，无需修改核心模块。回调接收关键字参数 `network`、`reaction`、`channel`、`center`；不适用时返回 `None`，适用时返回字典，包含 `convention`、`source`，以及 `factor` 或 `sigma_reactants`/`sigma_ts`。可选的 `references`、`kinetic_subclass`、`parameter_class` 也会保留，但不是因子计算前提。具体化学条件及相态/位点检查属于计算器；通用层只检查和保存统一的因子/参数记录。导入记录优先于相应通道的计算结果。在新进程中重放自定义计算器的保存配置前，需要重新注册回调；可执行 Python 代码不会被序列化。
 
-### 自动反应路径因子
+<a id="automatic-ne"></a>
+
+### 自动计算 n_e
 
 选择 `calculator="mapped_event_v1"`（`path_degeneracy_v1` 保留为兼容名称）。计算器直接从完整映射基元反应提取断成键、原子状态变化和产物物种划分，在反应物图的对称变换下枚举等价事件。新增模板不需要第二套 recipe，也不需要内置反应族名称。保存方法为 **`reaction_path_degeneracy`**，算法为 **`mapped_event_orbit_v1`**；它是明确计数约定下的结构路径因子，不是三维转动对称数计算。
 
@@ -352,7 +393,9 @@ PYTHONPATH=src python -m chemweave generate \
 
 [实现与验证报告](docs/path_degeneracy.md)列出计数依据、11 个文档对应或明确标记为派生的案例、人工枚举、独立穷举交叉检查及固定 RMG 源码引用。**本地没有运行 RMG**。本路线不采用 2023 年加氢裂化论文的自由态抵消假设，也不声称与 Vandewiele 转动对称数约定普遍相等：甲基—乙基歧化的路径因子为 3，而该文对称数约定为 6。
 
-### 气相与催化模板共同运行的默认网络
+<a id="combined-example"></a>
+
+### 气相与催化模板共同运行的示例
 
 点击 **Load example** 才会同时载入五条模板，种子为丙烷和金属空位，此演示默认启用可选因子标注。新建工作区保持空白。丙烷脱氢在深度 1 产生 H₂，随后在深度 2 参与 H₂ + 2 M → 2 MH。催化吸附模板与气相模板一起勾选，也可单独取消。旧项目保留其原有模板和种子；点击 **Load example** 载入组合示例，再点击 **Generate** 运行。
 
@@ -364,6 +407,8 @@ PYTHONPATH=src python -m chemweave generate \
 ```
 
 这些示例步骤通过生成的 H₂ 连接；这里没有增加金属参与丙烷脱氢的机理。
+
+<a id="catalytic-example"></a>
 
 ### 独立催化示例：H₂ 在金属位点上解离吸附
 
@@ -377,6 +422,8 @@ PYTHONPATH=src python -m chemweave generate \
 来源：Lozano-Blanco 等（2011），p.427 Table 2 (1)，H₂ + 2 M → 2 MH。节点 `[*:1]` 的相态为 `surface`，属性为 `kind="metal", type="M", capacity=1`。只需输入一种空位物种，生成器会将其用于两个独立、相同的反应物实例。模板以 `[#0]` 匹配位点，断开 H1–H2，形成 H1–M3 和 H2–M4。不同编号配对只有 `(H1–M3, H2–M4)`、`(H1–M4, H2–M3)` 两种；同时交换氢和位点只会重复已有配对，不增加路径。因此 `N=2`，`D=2!`，**n_e=1**。位点及其属性在吸附物中保留，不附加晶格邻接或取向倍数。
 
 英文网页点击 **Single-event annotation → H₂ adsorption on metal → Generate**，可以载入相同反应的快捷示例。使用独立自定义示例时，导入上述规则 JSON 并填写种子，或直接 **Open** 命令行生成的 `results/custom-catalytic-ne/network.json`。自定义模板使用独立 ID，未填写反应族名称，仍通过通用算法计算。反应详情和 CSV 均记录两条编号路径及除数 2。
+
+<a id="symmetry-example"></a>
 
 ### 原有对称数比验证示例
 
@@ -449,13 +496,19 @@ python -m chemweave annotate --network results/single-event/network.json \
 
 网络 JSON 第 6 版及网页项目文件保留中心、子类/共享参数类引用、独立因子、约定、来源、共享参数记录和可复现的标注配置。第 1–5 版仍可读取；缺少完整映射的旧记录在获得可用映射前不会被推断赋因子。仅在应用标注后，CSV 导出增加 **`single_event.csv`**（每个映射通道一条，包括不支持状态及中心）与 **`kinetic_parameters.csv`**（每个共享参数类一条）；`species.csv` 追加 `site_atoms`，标注导出追加 `n_e`、方法、算法、反应族、状态/原因、提取的事件、动力学通道、编号路径数及相同反应物除数，原有列保留。英文网页的反应详情可切换通道，查看中心、独立因子、对称数/过渡态约定、动力学子类、共享参数类以及已提供或待拟合的参数值。Save/Open 与 JSON/CSV 下载保留相同数据。
 
+<a id="progress-and-stop"></a>
+
 ## Python 中的进度与用户停止
 
 `Generator.generate` 新增可选的 `progress(network)` 和 `stop_requested()` 回调。完成种子登记和每次完整的模板/反应物组合执行后报告进度；进度回调访问当前网络，应尽快返回。停止回调返回真时，生成器返回结构一致的部分网络，并标记 `termination="user_stopped"`。已有调用无需修改。`Network.to_dict()`、`Network.from_dict()` 与文件持久化共用 JSON 表示。
 
+<a id="development"></a>
+
 ## 后续扩展
 
 后续可改进模板编写、不同规则集合的比较、物种生成路径探索，以及大型网络的生成性能。可选路径因子算法可继续扩展立体化学与共振处理。实验拟合和动力学求解可作为独立应用使用导出的网络。
+
+<a id="references"></a>
 
 ## 参考
 

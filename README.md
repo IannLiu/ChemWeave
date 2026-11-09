@@ -2,11 +2,30 @@
 
 # ChemWeave
 
-ChemWeave is a general-purpose Python tool for exploring chemical reaction networks from user-defined RDKit reaction templates. Provide seed species, mapped elementary-reaction templates, and search limits to generate a network, inspect atom mappings, trace formation pathways, and save or export the results. Reaction rules are maintained separately from the generation algorithm so users can explore different chemistries and compare alternative template sets.
+ChemWeave helps you explore how a reaction network grows from your starting species and reaction templates. Generate and inspect networks, follow product formation pathways, and save the results through a local web interface or Python. It also calculates **reaction-path factors (`n_e`) for single-event kinetics**, supporting gas-phase reactions and abstract catalytic sites.
 
-Network exploration is the core workflow. Optional single-event annotation calculates structural reaction-path factors (`n_e`) from complete mapped reactions or accepts imported factors; SEMK is one application, not the package's defining purpose. Supplied reactions are treated as elementary inputs, while the user defines the mechanism and template applicability.
+## Contents
 
-The bundled examples demonstrate gas-phase and catalytic templates working together: alkane dehydrogenation, olefin double-bond migration, terminal-olefin coupling, olefin scission, and H₂ adsorption on explicit metal sites. They illustrate template matching, atom mapping, network expansion, and optional path-factor calculation. Replace or extend them with templates for the reaction system you want to explore.
+- [Installation and testing](#installation)
+- [Browser interface](#web-interface)
+- [Python API](#python-api)
+- [Custom rules](#custom-templates)
+- [Network expansion](#network-expansion)
+- [Surface states and single-event modeling](#catalyst-sites)
+- [Atom mapping and symmetry](#atom-mapping)
+- [Depth and target stopping](#search-limits)
+- [Formation pathways](#formation-pathways)
+- [Command line and outputs](#cli-and-outputs)
+- [Single-event kinetics: calculating n_e](#single-event-kinetics)
+  - [Automatic n_e calculation](#automatic-ne)
+  - [Combined gas and catalytic example](#combined-example)
+  - [Standalone catalytic example: H₂ dissociative adsorption](#catalytic-example)
+  - [Earlier symmetry-ratio validation example](#symmetry-example)
+- [Progress and user cancellation in Python](#progress-and-stop)
+- [Further development](#development)
+- [References](#references)
+
+<a id="installation"></a>
 
 ## Installation and testing
 
@@ -21,12 +40,14 @@ python -m pytest -q
 
 pytest is declared as an optional development dependency in `.[test]`. To install it with the package, use `python -m pip install -e ".[test]"`. An environment that already has pytest can use the commands above.
 
-On macOS/Linux, you can also run directly from the project directory without installing the package:
+On macOS/Linux, with Python and RDKit already available in your environment, you can run directly from the project source without installing ChemWeave:
 
 ```bash
 PYTHONPATH=src python -m chemweave generate \
   --config examples/propane.toml --output results/propane
 ```
+
+<a id="web-interface"></a>
 
 ## Browser interface
 
@@ -75,6 +96,8 @@ Use `python -m chemweave web --port 8766` to choose another port, or add `--no-b
 
 The backend uses [FastAPI](https://fastapi.tiangolo.com/) and Uvicorn. RDKit draws molecule SVGs. [Cytoscape.js](https://js.cytoscape.org/) 3.34.4 and its MIT license are bundled in the package; the UI does not use a CDN at runtime. No Node.js or frontend build step is needed. Library and command-line generation remain usable without installing the web extra.
 
+<a id="python-api"></a>
+
 ## Python API
 
 ```python
@@ -96,6 +119,8 @@ restored = Network.from_json("results/network.json")
 `load_rules()` loads the bundled examples; `load_rules("my_rules.json")` loads your own rule file. Create `Species` objects with `from_smiles` or `from_mol` to standardize their structures, molecular formulas, and identities.
 
 The C6 example generated 22 species, 45 reactions, and 45 symmetry-grouped channels in the tested `base` environment (Python 3.12, RDKit 2026.03.6). These counts illustrate a run; they do not establish chemical validity.
+
+<a id="custom-templates"></a>
 
 ## Custom rules
 
@@ -131,6 +156,8 @@ You can also define rules directly in Python with `ReactionRule(...)`. The main 
 
 Rules are not automatically reversed. Supply a template for the reverse reaction when needed; some double-bond migration templates can themselves generate both directions. Setting `kind` to `elementary` does not mean the program has established the mechanism.
 
+<a id="network-expansion"></a>
+
 ## Network expansion
 
 1. Standardize seed structures and identify species by structure, phase, legacy site label, and explicit catalyst-node attributes.
@@ -143,6 +170,8 @@ Rules are not automatically reversed. Supply a template for the reverse reaction
 Checks occur when inputs are read and candidate reactions are generated; the full network is not repeatedly revalidated during enumeration. Molecular descriptors and reaction templates are prepared when their objects are created. Enumeration does not estimate barriers or fluxes, and species are not removed merely because they have not been detected experimentally.
 
 `max_carbon` applies to each species, including the seeds. It defines the scope of a run; it does not establish that pathways outside that scope are unimportant in the actual system.
+
+<a id="catalyst-sites"></a>
 
 ## Surface states and single-event modeling
 
@@ -158,6 +187,8 @@ acid = Species.from_smiles("[*:1]O", phase="surface",
 An abstract node can be vacant or attached to one atom with bond order 1–4. Missing attributes default to kind `surface`, type `X`, capacity 1. Multiple nodes represent multi-site occupancy. The Brønsted model contains a real O–H bond and transferable mapped H; protonation forms a surface-associated framework O−/carbenium ion pair, retained as one species. Attributes, attachments, isotope and charge participate in identity, matching, mapping, conservation and persistence. Lattice adjacency and adsorption orientation are outside this abstract graph model. See [the counting and catalyst-model report](docs/path_degeneracy.md) for the precise assumptions and source-linked tests.
 
 Legacy `Species.from_smiles("C=CC", phase="surface", site="BAS")` remains usable for generic labelled networks, but a species-level label is insufficient for automatic catalytic path counting. In the browser, expand **Phase and catalyst sites** to enter the node metadata JSON. Save JSON or the accompanying `site_atoms` data: compact SMILES alone cannot preserve catalyst types.
+
+<a id="atom-mapping"></a>
 
 ## Atom mapping and symmetry
 
@@ -186,6 +217,8 @@ Basic atom classes use `CanonicalRankAtoms(breakTies=False, includeAtomMaps=Fals
 These are single-step mappings. Numbers are local to a species representative or a reaction occurrence, not globally unique atom identities throughout the network. Multi-step ancestry requires composing the individual mappings and reconciling product atoms with the species registry representatives; map integers alone do not establish that correspondence. Neither channel counts nor `match_count` values are SEMK degeneracy factors. Independent factors and kinetic parameter sharing are handled by the optional single-event annotation module. The package does not fit parameters or solve rates, conversions, or selectivities.
 
 New JSON exports use schema version 6 and preserve compact channel representatives, counters, numbering, symmetry classes, seed inputs, species/reaction depths, and target status. Version-3, version-4 and version-5 files remain readable; depths absent from older files are left unknown. Loading a version-2 file converts its raw matches and channel indices to the compact representation. Version-1 files remain readable as structural networks; their incomplete legacy provenance is not retained as mapped channels. Source atom mappings cannot be recovered from an old unmapped structure.
+
+<a id="search-limits"></a>
 
 ## Depth and target stopping
 
@@ -238,6 +271,8 @@ max_depth = 4
 
 Target stopping saves the complete accepted reaction, all its coproducts, and the channel mapping that satisfied the condition, then returns immediately. Unvisited matches, channels, and alternative pathways are not enumerated, so match counters can be incomplete. The resulting partial network depends on seed/rule enumeration order and does not establish that every shortest pathway has been collected.
 
+<a id="formation-pathways"></a>
+
 ## Formation pathways
 
 After generating or opening a network, use **Formation pathways** in the left panel. Select a product, set **Max reactions per route** and **Max pathways**, then click **Analyze formation**. You can also start from a species inspector's **Analyze formation** button. Turn off **Stop when all targets are found** before generating the network if you want to collect alternative routes. Analysis uses the stored network; it does not expand a previously truncated run.
@@ -278,6 +313,8 @@ Limits and interpretation:
 - `termination="exhausted"` means enumeration finished within the **stored network and the chosen route-size bound**. `max_pathways` means the cap was reached and completeness was not confirmed; `user_stopped` means cancellation. Traversal follows stored reaction order, not a shortest-path or kinetic ranking.
 - `network_search_complete` is true only for network termination `exhausted` or `max_depth`, relative to its rules and configured bounds. Target stopping, species/reaction budgets, and user cancellation can omit alternative routes even when pathway enumeration itself finishes. The web interface reports these two sources of incompleteness separately.
 
+<a id="cli-and-outputs"></a>
+
 ## Command line and outputs
 
 After installation, run:
@@ -313,7 +350,9 @@ The saved `termination` states why generation stopped:
 
 The command exits with code 0 for exhaustion, depth completion, or target success **provided no requested targets are missing**. A size-budget stop, a user stop, or missing targets returns 2; outputs are still saved. Input errors are reported by Python/RDKit.
 
-## Optional single-event annotation
+<a id="single-event-kinetics"></a>
+
+## Single-event kinetics: calculating n_e
 
 SEMK is one use of ChemWeave. `Generator` continues to enumerate general rule-based networks without kinetic assumptions. Call `annotate_single_events(network, ...)` afterwards, add a `[single_event]` TOML section for CLI generation, or enable **Single-event annotation → Annotate after generation** in the English browser interface. Omitting the option leaves networks unannotated. All supplied mapped steps, including the default demo rules, are eligible for path-factor calculation. Historical `kind="overall"` labels in saved projects do not block calculation. Reapply annotation to replace old skipped results; regeneration is not required.
 
@@ -321,7 +360,9 @@ SEMK is one use of ChemWeave. `Generator` continues to enumerate general rule-ba
 
 Alternative calculation methods can use `register_single_event_calculator(name, callback)` and then `annotate_single_events(network, calculator=name)`, without changing the core module. A callback receives keyword arguments `network`, `reaction`, `channel`, `center`; it returns `None` when inapplicable, or a dictionary containing `convention`, `source`, and either `factor` or `sigma_reactants`/`sigma_ts`. Optional `references`, `kinetic_subclass` and `parameter_class` are retained; these are not factor prerequisites. The callback owns the chemical and phase/site applicability checks; the core checks and stores the common factor/parameter records. Imported records override calculator output for the selected channels. Custom callbacks must be registered again before replaying their saved options in a new process; executable Python code is not serialized.
 
-### Automatic reaction-path factors
+<a id="automatic-ne"></a>
+
+### Automatic n_e calculation
 
 Select `calculator="mapped_event_v1"` (`path_degeneracy_v1` is a compatibility alias). The calculator extracts bond changes, atom-state changes and product species partitions directly from a complete mapped elementary reaction. It enumerates the event's orbit under reactant-graph symmetry. New templates need no second recipe and no built-in family name. The saved method is **`reaction_path_degeneracy`**, algorithm **`mapped_event_orbit_v1`**; this is a structural path factor under the documented counting convention, not a three-dimensional rotational-symmetry calculation.
 
@@ -352,7 +393,9 @@ There is no C/H, acyclic or family whitelist. Validation covers homolysis, abstr
 
 [The implementation and validation report](docs/path_degeneracy.md) records the counting proof, 11 document-linked or explicitly derived cases, manual enumeration, independent brute-force checks and fixed RMG source references. RMG itself was **not run** locally. This route does not use the 2023 hydrocracking free-state cancellation assumption or claim equality with all Vandewiele rotational factors: methyl/ethyl disproportionation yields path factor 3, versus 6 under that paper's symmetry convention.
 
-### Combined gas and catalytic default network
+<a id="combined-example"></a>
+
+### Combined gas and catalytic example
 
 Click **Load example** to load all five templates together, with propane and a vacant metal-site seed; optional factor annotation is enabled in this demo. A new workspace starts blank. Propane dehydrogenation produces H₂ at depth 1, which participates in H₂ + 2 M → 2 MH at depth 2. The adsorption template is selected alongside the gas templates and can be unchecked independently. Existing saved projects retain their own templates and seeds; choose **Load example** to load the combined example, then **Generate** to run it.
 
@@ -364,6 +407,8 @@ PYTHONPATH=src python -m chemweave generate \
 ```
 
 The coupling between these demo steps is the generated H₂ species; this does not introduce a metal-mediated propane dehydrogenation mechanism.
+
+<a id="catalytic-example"></a>
 
 ### Standalone catalytic example: H₂ dissociative adsorption
 
@@ -377,6 +422,8 @@ PYTHONPATH=src python -m chemweave generate \
 Source: Lozano-Blanco et al. (2011), p.427 Table 2 (1), H₂ + 2 M → 2 MH. The node `[*:1]` has `phase="surface"` and attributes `kind="metal", type="M", capacity=1`. One seed site species supplies two independent identical reactant occurrences. The template matches sites with `[#0]`, breaks H1–H2 and forms H1–M3 and H2–M4. The distinct labelled assignments are `(H1–M3, H2–M4)` and `(H1–M4, H2–M3)`; simultaneous swapping generates a duplicate assignment, not a third path. Thus `N=2`, `D=2!`, **n_e=1**. Sites and their properties persist into the adsorbates. No lattice-neighbor or orientation multiplicity is assumed.
 
 In the English web interface, **Single-event annotation → H₂ adsorption on metal → Generate** loads the same reaction as a built-in convenience. To use the standalone custom example, import its rules JSON and enter the seeds above, or **Open** the CLI-generated `results/custom-catalytic-ne/network.json`. The custom template has its own ID and omits a family label; it uses the same generic calculation. The reaction inspector and CSV record both the two labelled paths and the divisor 2.
+
+<a id="symmetry-example"></a>
 
 ### Earlier symmetry-ratio validation example
 
@@ -449,13 +496,19 @@ The same keys are accepted by `annotate_single_events(network, **options)` and t
 
 Network JSON schema 6 and saved browser projects retain centers, subclass/class references, independent factors, conventions, provenance, shared parameter records, and reproducible annotation options. Schema 1–5 remains readable; old records without complete mapping remain unannotated until usable mappings are available. CSV export adds **`single_event.csv`** (one annotation per mapped channel, including unsupported status and center) and **`kinetic_parameters.csv`** (one record per shared class) only when annotation has been applied. `species.csv` appends `site_atoms`; annotation exports append `n_e`, method, algorithm, family, status/reason, extracted event, kinetic-channel identity, labelled path count and identical-reactant divisor. Existing columns are retained. In the English reaction inspector, select a channel to view its center, independent factor, symmetry/TS convention, subclass, shared class, and fitted/unfitted values. Save/Open and JSON/CSV downloads preserve the same data.
 
+<a id="progress-and-stop"></a>
+
 ## Progress and user cancellation in Python
 
 `Generator.generate` accepts optional `progress(network)` and `stop_requested()` callbacks. Progress is reported after seeds are registered and after a complete template/reactant application; the callback sees the current network and should return promptly. When the stop callback returns true, generation returns a consistent partial network with `termination="user_stopped"`. Existing calls need no changes. `Network.to_dict()` and `Network.from_dict()` share the JSON representation used by file persistence.
 
+<a id="development"></a>
+
 ## Further development
 
 Further development can improve template authoring, comparison of alternative rule sets, formation-pathway exploration, and performance on larger networks. The optional path-factor algorithm can extend its stereochemistry and resonance handling. Experimental fitting and kinetic solving can consume exported networks as separate applications.
+
+<a id="references"></a>
 
 ## References
 
