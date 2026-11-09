@@ -2,6 +2,8 @@
 
 Updated 2026-11-09. The current calculator is `mapped_event_v1`, with output method `reaction_path_degeneracy` and algorithm `mapped_event_orbit_v1`. `path_degeneracy_v1` is retained as a compatibility selection name for this new calculator. Previously saved annotations remain unchanged until explicitly recalculated.
 
+ChemWeave explores networks defined by user-supplied reaction templates. This report describes its optional path-factor annotation layer; the validation reactions are examples for checking that layer, not a restriction on the network generator’s application domain.
+
 **The input is a complete mapped elementary reaction, not a second family recipe.** The user supplies the elementary mechanism; the software does not establish elementary character, estimate barriers, solve a reactor model or fit experimental data. Family names are optional provenance. The bundled templates are examples and validation inputs only and are never consulted by the counting engine.
 
 ## Interfaces

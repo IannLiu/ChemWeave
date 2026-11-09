@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "chemweave"
 version = "0.6.0"
-description = "Rule-based chemical reaction network generation with RDKit"
+description = "Chemical reaction network exploration with user-defined RDKit templates"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["rdkit>=2024.3"]

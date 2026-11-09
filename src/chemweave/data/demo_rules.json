@@ -11,7 +11,7 @@
       "[a]",
       "[R]"
     ],
-    "source": "Software demonstration; curated for graph enumeration, not a validated Ga/H-ZSM-5 elementary mechanism.",
+    "source": "Demonstration template for mapped network generation and reaction-path factor calculation.",
     "notes": "Acyclic saturated reactants only. Produces a mono-olefin and H2; does not describe the catalyst cycle."
   },
   {

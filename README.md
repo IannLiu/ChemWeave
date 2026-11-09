@@ -2,9 +2,11 @@
 
 # ChemWeave
 
-A Python package for generating chemical reaction networks from RDKit reaction templates. Provide seed species, reaction rules, and a carbon-number limit to produce species tables, reaction tables, stoichiometry, and rule provenance. Rules are maintained separately from the enumeration algorithm so the chemistry can evolve as the mechanism is developed.
+ChemWeave is a general-purpose Python tool for exploring chemical reaction networks from user-defined RDKit reaction templates. Provide seed species, mapped elementary-reaction templates, and search limits to generate a network, inspect atom mappings, trace formation pathways, and save or export the results. Reaction rules are maintained separately from the generation algorithm so users can explore different chemistries and compare alternative template sets.
 
-Network generation is the core API; optional single-event annotations support kinetic parameter organization, including SEMK as one application. Five default bundled rules demonstrate mapped structural transformations: alkane dehydrogenation, olefin double-bond migration, restricted terminal-olefin coupling, olefin scission, and H₂ adsorption on explicit metal sites. **These examples do not cover a complete aromatization network and are not a validated elementary mechanism for Ga/H-ZSM-5.**
+Network exploration is the core workflow. Optional single-event annotation calculates structural reaction-path factors (`n_e`) from complete mapped reactions or accepts imported factors; SEMK is one application, not the package's defining purpose. Supplied reactions are treated as elementary inputs, while the user defines the mechanism and template applicability.
+
+The bundled examples demonstrate gas-phase and catalytic templates working together: alkane dehydrogenation, olefin double-bond migration, terminal-olefin coupling, olefin scission, and H₂ adsorption on explicit metal sites. They illustrate template matching, atom mapping, network expansion, and optional path-factor calculation. Replace or extend them with templates for the reaction system you want to explore.
 
 ## Installation and testing
 
@@ -153,7 +155,7 @@ acid = Species.from_smiles("[*:1]O", phase="surface",
     site_atoms={1: {"kind": "bronsted", "type": "ZSM5_model", "capacity": 1}})
 ```
 
-An abstract node can be vacant or attached to one atom with bond order 1–4. Missing attributes default to kind `surface`, type `X`, capacity 1. Multiple nodes represent multi-site occupancy. The Brønsted model contains a real O–H bond and transferable mapped H; protonation forms a surface-associated framework O−/carbenium ion pair, retained as one species. Attributes, attachments, isotope and charge participate in identity, matching, mapping, conservation and persistence. This model does not describe lattice adjacency, adsorption faces or a full Ga cycle. See [the counting and catalyst-model report](docs/path_degeneracy.md) for the precise assumptions and source-linked tests.
+An abstract node can be vacant or attached to one atom with bond order 1–4. Missing attributes default to kind `surface`, type `X`, capacity 1. Multiple nodes represent multi-site occupancy. The Brønsted model contains a real O–H bond and transferable mapped H; protonation forms a surface-associated framework O−/carbenium ion pair, retained as one species. Attributes, attachments, isotope and charge participate in identity, matching, mapping, conservation and persistence. Lattice adjacency and adsorption orientation are outside this abstract graph model. See [the counting and catalyst-model report](docs/path_degeneracy.md) for the precise assumptions and source-linked tests.
 
 Legacy `Species.from_smiles("C=CC", phase="surface", site="BAS")` remains usable for generic labelled networks, but a species-level label is insufficient for automatic catalytic path counting. In the browser, expand **Phase and catalyst sites** to enter the node metadata JSON. Save JSON or the accompanying `site_atoms` data: compact SMILES alone cannot preserve catalyst types.
 
@@ -453,7 +455,7 @@ Network JSON schema 6 and saved browser projects retain centers, subclass/class 
 
 ## Further development
 
-Extend the rule set with sources and applicability conditions for cracking, branching, cyclization, and aromatic formation, then compare results at higher carbon-number limits. Further factor work can extend supported graph stereochemistry and resonance handling. Experimental fitting and kinetic solving remain separate applications.
+Further development can improve template authoring, comparison of alternative rule sets, formation-pathway exploration, and performance on larger networks. The optional path-factor algorithm can extend its stereochemistry and resonance handling. Experimental fitting and kinetic solving can consume exported networks as separate applications.
 
 ## References
 
