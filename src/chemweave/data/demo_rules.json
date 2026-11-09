@@ -3,9 +3,14 @@
     "id": "alkane_dehydrogenation",
     "smarts": "[C;X4:1](-[H:3])-!@[C;X4:2](-[H:4])>>[C:1]=[C:2].[H:3]-[H:4]",
     "family": "dehydrogenation",
-    "kind": "overall",
+    "kind": "elementary",
     "version": "2",
-    "exclude_smarts": ["[#6]=[#6]", "[#6]#[#6]", "[a]", "[R]"],
+    "exclude_smarts": [
+      "[#6]=[#6]",
+      "[#6]#[#6]",
+      "[a]",
+      "[R]"
+    ],
     "source": "Software demonstration; curated for graph enumeration, not a validated Ga/H-ZSM-5 elementary mechanism.",
     "notes": "Acyclic saturated reactants only. Produces a mono-olefin and H2; does not describe the catalyst cycle."
   },
@@ -13,19 +18,27 @@
     "id": "olefin_double_bond_shift",
     "smarts": "[C:1]=[C:2]-!@[C;X4:3](-[H:4])>>[C:1](-[H:4])-[C:2]=[C:3]",
     "family": "double_bond_isomerization",
-    "kind": "overall",
+    "kind": "elementary",
     "version": "2",
-    "exclude_smarts": ["[R]", "[#6]#[#6]", "[a]"],
-    "source": "Software demonstration; not an elementary proton-transfer mechanism.",
+    "exclude_smarts": [
+      "[R]",
+      "[#6]#[#6]",
+      "[a]"
+    ],
+    "source": "Software demonstration of mapped double-bond migration; no catalyst cycle encoded.",
     "notes": "Adjacent double-bond migration; directed template applications can generate both directions."
   },
   {
     "id": "terminal_olefin_coupling",
     "smarts": "[C;H2:1]=[C;H1,H2:2].[C;H2:3](-[H:5])=[C;H1,H2:4]>>[C:1](-[H:5])-[C:2]-[C:3]=[C:4]",
     "family": "oligomerization",
-    "kind": "overall",
+    "kind": "elementary",
     "version": "2",
-    "exclude_smarts": ["[R]", "[#6]#[#6]", "[a]"],
+    "exclude_smarts": [
+      "[R]",
+      "[#6]#[#6]",
+      "[a]"
+    ],
     "source": "Software demonstration of a restricted neutral coupling transformation.",
     "notes": "One coupling connectivity for terminal olefins; not all regioisomers or acid-catalysed elementary steps."
   },
@@ -33,10 +46,39 @@
     "id": "olefin_scission",
     "smarts": "[C;X4:1](-[H:5])-!@[C;X4:2]-!@[C:3]=[C:4]>>[C:1]=[C:2].[C:3](-[H:5])=[C:4]",
     "family": "scission",
-    "kind": "overall",
+    "kind": "elementary",
     "version": "2",
-    "exclude_smarts": ["[R]", "[#6]#[#6]", "[a]"],
+    "exclude_smarts": [
+      "[R]",
+      "[#6]#[#6]",
+      "[a]"
+    ],
     "source": "Software demonstration of neutral olefin cleavage.",
     "notes": "Checks multiple-product stoichiometry; does not explicitly represent a surface alkoxide or carbenium-like transition state."
+  },
+  {
+    "id": "user_metal_H2_adsorption",
+    "smarts": "[#1:1]-[#1:2].[#0;D0:3].[#0;D0:4]>>[#0:3]-[#1:1].[#0:4]-[#1:2]",
+    "reactant_phases": [
+      "gas",
+      "surface",
+      "surface"
+    ],
+    "product_phases": [
+      "surface",
+      "surface"
+    ],
+    "site_constraints": {
+      "3": {
+        "kind": "metal"
+      },
+      "4": {
+        "kind": "metal"
+      }
+    },
+    "source": "Lozano-Blanco et al. 2011, p.427 Table 2 (1), DOI 10.2516/ogst/2009075",
+    "notes": "H2 + 2 M -> 2 MH. Two independent identical abstract metal sites; no lattice adjacency or adsorption orientation. No family registration or separate factor recipe.",
+    "kind": "elementary",
+    "family": "metal_hydrogen_adsorption"
   }
 ]

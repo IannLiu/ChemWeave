@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from contextlib import asynccontextmanager
 from functools import lru_cache
+from hashlib import sha256
 from io import BytesIO
 from importlib.resources import files
 import json
@@ -14,7 +15,7 @@ import webbrowser
 from zipfile import ZipFile
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from rdkit import Chem
@@ -123,11 +124,18 @@ def create_app(browser_url=None):
 
     @app.get("/")
     def index():
-        return FileResponse(static / "index.html")
+        html = (static / "index.html").read_text()
+        for asset in ("app.js", "style.css"):
+            version = sha256((static / asset).read_bytes()).hexdigest()[:16]
+            html = html.replace(f"/static/{asset}?v=blank-workspace-2", f"/static/{asset}?v={version}")
+        return Response(html, media_type="text/html", headers={"Cache-Control": "no-store"})
 
     @app.get("/api/rules")
     def rules():
-        return {"version": __version__, "rules": [r.to_dict() for r in load_rules()]}
+        return {"version": __version__, "rules": [r.to_dict() for r in load_rules()],
+                "seeds": [{"smiles": "CCC", "name": "Propane"},
+                          {"smiles": "[*:1]", "name": "Vacant metal site", "phase": "surface",
+                           "site_atoms": {"1": {"kind": "metal", "type": "M", "capacity": 1}}}]}
 
     @app.post("/api/rules/validate")
     def validate_rules(records: list[dict]):

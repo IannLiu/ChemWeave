@@ -4,7 +4,7 @@
 
 一个基于 RDKit 反应模板的 Python 反应网络生成包。输入初始物种、反应规则和碳数范围，输出物种表、反应表、计量关系和规则来源。规则与生成算法分开维护，便于随文献整理逐步扩展。
 
-网络生成是核心 API；可选的 single-event 标注用于组织动力学参数，SEMK 是其中一种用途。默认内置四条规则用于检验总体结构变换：烷烃脱氢、烯烃双键迁移、受限的端烯烃偶联和烯烃裂解。**这些示例没有覆盖完整芳构化网络，也不是经过验证的 Ga/H-ZSM-5 基元机理。**
+网络生成是核心 API；可选的 single-event 标注用于组织动力学参数，SEMK 是其中一种用途。默认内置五条规则用于检验映射结构变换：烷烃脱氢、烯烃双键迁移、受限的端烯烃偶联、烯烃裂解和显式金属位点上的 H₂ 吸附。**这些示例没有覆盖完整芳构化网络，也不是经过验证的 Ga/H-ZSM-5 基元机理。**
 
 ## 安装与测试
 
@@ -43,7 +43,7 @@ python -m chemweave web
 
 “Save project”（保存项目）下载包含输入、所选规则、设置和网络的 JSON 文件。“Open”（打开）支持项目文件及现有 `network.json`，包含受支持的旧版格式。“Export”（导出）支持网络 JSON、CSV 表格及 DOT 的 ZIP 包，或当前网络视图的 PNG 图片。下载位置遵循浏览器的正常设置。
 
-每个本地服务在内存中维护一个工作区，多个浏览器标签页共享它。刷新会恢复当前工作区；保存项目后可以跨服务重启恢复。“New”（新建）在确认后清空工作区。服务只监听本机回环地址；可在终端按 Ctrl+C 关闭。
+每个本地服务在内存中维护一个工作区，多个浏览器标签页共享它。刷新会恢复当前工作区；保存项目后可以跨服务重启恢复。**New** 在确认后创建空白工作区，不预填种子或模板。**Load example** 将当前工作区替换为气相＋催化示例输入，但不自动运行；**Generate** 只根据当前输入生成网络。服务只监听本机回环地址；可在终端按 Ctrl+C 关闭。
 
 如果希望使用独立环境，在项目目录中创建一次：
 
@@ -97,7 +97,7 @@ restored = Network.from_json("results/network.json")
 
 ## 自定义规则
 
-规则使用 JSON 列表存储。以下例子明确表示丙烷脱氢的总体变换，包含 H2：
+规则使用 JSON 列表存储。以下例子表示含 H2 的映射丙烷脱氢步骤。软件按用户提供的基元步骤处理，不负责证明其基元性：
 
 ```json
 [
@@ -105,10 +105,10 @@ restored = Network.from_json("results/network.json")
     "id": "propane_dehydrogenation",
     "smarts": "[C;H3:1](-[H:4])-[C;H2:2](-[H:5])-[C;H3:3]>>[C:1]=[C:2]-[C:3].[H:4]-[H:5]",
     "family": "dehydrogenation",
-    "kind": "overall",
+    "kind": "elementary",
     "version": "1",
     "source": "在此填写文献或规则依据",
-    "notes": "总体变换，未展开催化循环"
+    "notes": "映射步骤，未展开催化循环"
   }
 ]
 ```
@@ -120,7 +120,7 @@ restored = Network.from_json("results/network.json")
 | `id` | 规则唯一名称；不同机理即使总反应相同，也可以使用不同规则 ID |
 | `smarts` | RDKit Reaction SMARTS，原子映射编号用于定义结构变化 |
 | `family` | 反应族标签 |
-| `kind` | 步骤性质，默认 `elementary`；按用户提供的基元反应处理，显式 `overall` 演示规则仍是总体反应 |
+| `kind` | 可选历史元数据，默认 `elementary`；所有输入步骤按基元反应处理，此字段不限制因子计算 |
 | `version`、`source`、`notes` | 规则版本、依据和假设 |
 | `exclude_smarts` | 任一反应物命中其中一个模式时，不应用此规则 |
 | `reactant_phases`、`product_phases` | 按模板顺序指定各物种相态，默认全部为 `gas` |
@@ -171,7 +171,7 @@ print(seed.symmetry_classes)  # (map_number, symmetry_class) pairs
 
 多分子反应中，每份反应物独立编号。与前一份反应物冲突的编号从全部预留编号之后重新分配。每个匹配记录的 `atom_mapping` 保存反应物位置、来源原子索引、物种内部编号、用户输入编号及本次反应编号。因此，同种物种的两份分子可以参与反应，而不会共享原子 ID。结构相同的种子输入记录在 `network.seed_inputs` 中；网络扩展对每种物种使用一个代表。
 
-模板在显式氢分子上执行。涉及氢转移的规则必须明确移动带映射的氢原子及其化学键。若生成无法追溯的新原子、丢失来源原子或在产物中重复使用编号，候选会以 `atom_mapping` 原因被拒绝；电荷和位点守恒另行检查。旧的隐式氢模板可能需要改写，本版本不会自动猜测氢的对应关系。内置第 2 版规则提供总体反应的原子对应，并不代表已经验证了真实的基元氢转移机理。
+模板在显式氢分子上执行。涉及氢转移的规则必须明确移动带映射的氢原子及其化学键。若生成无法追溯的新原子、丢失来源原子或在产物中重复使用编号，候选会以 `atom_mapping` 原因被拒绝；电荷和位点守恒另行检查。旧的隐式氢模板可能需要改写，本版本不会自动猜测氢的对应关系。内置第 2 版规则提供完整原子对应。与用户模板一样，基元性是输入假设，不是软件验证结果。
 
 `reaction.channels` 对每种非等价反应映射只保存一份完整代表。记录包括 `mapped_reaction_smiles`、两侧带映射的 SMILES 列表、`atom_mapping` 来源编号表、产物原子来源、`symmetry_key` 和 `match_count`。即使计量关系合并了两份相同物种，记录仍区分反应物实例顺序。遇到重复时，仅增加已有通道的 `match_count`，丢弃该次完整映射；不再单独保存 `reaction.matches` 或重复匹配索引列表。
 
@@ -313,7 +313,7 @@ DOT 导出不依赖 Graphviz；如已安装 Graphviz，可用 `dot -Tsvg results
 
 ## 可选的 single-event 标注
 
-SEMK 是 ChemWeave 的一种用途。`Generator` 仍然生成通用的规则反应网络，不带动力学假设。可以在生成后调用 `annotate_single_events(network, ...)`，在 CLI 配置中加入 `[single_event]`，或在英文网页的 **Single-event annotation → Annotate after generation** 中启用。省略该选项时网络不带标注。默认四条演示规则仍是总体反应，不会获得基元 single-event 因子。
+SEMK 是 ChemWeave 的一种用途。`Generator` 仍然生成通用的规则反应网络，不带动力学假设。可以在生成后调用 `annotate_single_events(network, ...)`，在 CLI 配置中加入 `[single_event]`，或在英文网页的 **Single-event annotation → Annotate after generation** 中启用。省略该选项时网络不带标注。所有输入的映射步骤（包括默认五条示例）均可进入路径因子计算。旧项目中的 `kind="overall"` 历史标记不再阻止计算；对旧项目重新应用标注即可替换原来的跳过结果，无需重新生成网络。
 
 `single_event.py` 是与反应族无关的框架，只负责中心提取、调用显式选择的计算器、接受导入因子及管理共享参数。默认不选择计算器：`annotate_single_events(network)` 只提取反应中心，不假定任何反应族或赋予因子。自动结构路径计数位于 `path_degeneracy.py`，可选示例模板位于 `data/path_families.json`，计数算法不读取这些模板。原有甲烷对称数示例仍单独保留在 `single_event_calculators.py`。
 
@@ -350,6 +350,32 @@ PYTHONPATH=src python -m chemweave generate \
 
 [实现与验证报告](docs/path_degeneracy.md)列出计数依据、11 个文档对应或明确标记为派生的案例、人工枚举、独立穷举交叉检查及固定 RMG 源码引用。**本地没有运行 RMG**。本路线不采用 2023 年加氢裂化论文的自由态抵消假设，也不声称与 Vandewiele 转动对称数约定普遍相等：甲基—乙基歧化的路径因子为 3，而该文对称数约定为 6。
 
+### 气相与催化模板共同运行的默认网络
+
+点击 **Load example** 才会同时载入五条模板，种子为丙烷和金属空位，此演示默认启用可选因子标注。新建工作区保持空白。丙烷脱氢在深度 1 产生 H₂，随后在深度 2 参与 H₂ + 2 M → 2 MH。催化吸附模板与气相模板一起勾选，也可单独取消。旧项目保留其原有模板和种子；点击 **Load example** 载入组合示例，再点击 **Generate** 运行。
+
+`examples/combined_gas_catalytic.toml` 可运行同一组合：
+
+```bash
+PYTHONPATH=src python -m chemweave generate \
+  --config examples/combined_gas_catalytic.toml --output results/combined-gas-catalytic
+```
+
+这些示例步骤通过生成的 H₂ 连接；这里没有增加金属参与丙烷脱氢的机理。
+
+### 独立催化示例：H₂ 在金属位点上解离吸附
+
+与自定义气相模板并列，`examples/custom_catalytic_rules.json` 提供自定义催化模板，不注册反应族，也不另写 recipe；`examples/custom_catalytic_ne.toml` 配置氢气和显式金属空位：
+
+```bash
+PYTHONPATH=src python -m chemweave generate \
+  --config examples/custom_catalytic_ne.toml --output results/custom-catalytic-ne
+```
+
+来源：Lozano-Blanco 等（2011），p.427 Table 2 (1)，H₂ + 2 M → 2 MH。节点 `[*:1]` 的相态为 `surface`，属性为 `kind="metal", type="M", capacity=1`。只需输入一种空位物种，生成器会将其用于两个独立、相同的反应物实例。模板以 `[#0]` 匹配位点，断开 H1–H2，形成 H1–M3 和 H2–M4。不同编号配对只有 `(H1–M3, H2–M4)`、`(H1–M4, H2–M3)` 两种；同时交换氢和位点只会重复已有配对，不增加路径。因此 `N=2`，`D=2!`，**n_e=1**。位点及其属性在吸附物中保留，不附加晶格邻接或取向倍数。
+
+英文网页点击 **Single-event annotation → H₂ adsorption on metal → Generate**，可以载入相同反应的快捷示例。使用独立自定义示例时，导入上述规则 JSON 并填写种子，或直接 **Open** 命令行生成的 `results/custom-catalytic-ne/network.json`。自定义模板使用独立 ID，未填写反应族名称，仍通过通用算法计算。反应详情和 CSV 均记录两条编号路径及除数 2。
+
 ### 原有对称数比验证示例
 
 原有对称数验证族是正向气相 **H/D 原子 + 甲烷(H/D) → 双氢分子 + 甲基自由基**。基元规则单独放在 `src/chemweave/data/single_event_rules.json`；网页的 **Load methane validation example** 可以载入该例，不改变默认规则。对应 CLI 示例：
@@ -371,7 +397,7 @@ PYTHONPATH=src python -m chemweave generate \
 
 这些 H/D 结果来自上述理想几何及保持同位素的正旋转：Td 有 12 个、C3v 有 3 个、C2v 有 2 个、Cs 有 1 个。[NIST 对称数说明](https://cccbdb.nist.gov/thermox.asp) 介绍了相应约定；[NIST CCCBDB 第 8 号反应](https://cccbdb.nist.gov/ts2x.asp?ri=8) 收录 H + CH4 基元反应；[Hu 等，J. Phys. Chem. A 2006](https://web.stanford.edu/group/Zarelab/publinks/764.pdf) 描述了其 C3v 鞍点。同位素变体验证的是这一对称数约定，不是实验测得的动力学同位素效应。包中未提供拟合或从头算速率常数。
 
-每个映射通道新增 `single_event.reaction_center`：变化的化学键（含键级/立体信息）、变化的原子电荷/自由基/立体状态，以及参与变化的**本次反应局部映射号**。甲烷对称数计算器检查完整的断成键/自由基变化及气相无位点条件，不依赖规则名称。请统一普通氢的标签：甲烷混用未指定同位素 H 与显式 1H 时不计算因子，因为 RDKit 会将其拆成不同通道。动力学子类包括碳同位素、转移同位素、夺氢原子同位素和旁观氢同位素组成，因此不同同位素环境不会自动共享拟合参数。不支持的基元反应族和总体反应仍保留中心，并明确标为 `unsupported`，不赋因子；没有映射通道的反应列在 `network.single_event["unmapped_reactions"]` 中。
+每个映射通道新增 `single_event.reaction_center`：变化的化学键（含键级/立体信息）、变化的原子电荷/自由基/立体状态，以及参与变化的**本次反应局部映射号**。甲烷对称数计算器检查完整的断成键/自由基变化及气相无位点条件，不依赖规则名称。请统一普通氢的标签：甲烷混用未指定同位素 H 与显式 1H 时不计算因子，因为 RDKit 会将其拆成不同通道。动力学子类包括碳同位素、转移同位素、夺氢原子同位素和旁观氢同位素组成，因此不同同位素环境不会自动共享拟合参数。不在旧甲烷计算器适用范围内的输入仍保留中心，并明确标为 `unsupported`，不赋因子；历史步骤分类标签不限制通用路径计算器。没有映射通道的反应列在 `network.single_event["unmapped_reactions"]` 中。
 
 **`match_count` 和通道数均不参与 single-event 因子的计算。** 测试故意改变模板，使匹配次数从 4 变为 12，独立计算的因子仍为 4；提前停止导致的计数不完整也不影响对称数比。这一旧对称数计算器只覆盖正向甲烷族；独立路径计算器的范围和归一化见上文，不能把它理解为对称数比算法的通用扩展。
 

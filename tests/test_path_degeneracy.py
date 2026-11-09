@@ -195,10 +195,10 @@ def test_assigned_stereo_is_an_algorithm_limit_not_missing_input():
                for r in n.reactions for c in r.channels)
 
 
-def test_unsupported_is_not_one_and_import_still_works():
+def test_no_calculator_is_not_one_and_import_still_works():
     from chemweave import load_rules
     n = Generator(load_rules(), GenerationConfig(max_depth=1)).generate([Species.from_smiles("CCC")])
-    annotate_single_events(n, calculator="path_degeneracy_v1")
+    annotate_single_events(n)
     assert all(c["single_event"]["status"] == "unsupported" and "factor" not in c["single_event"] for r in n.reactions for c in r.channels)
     case = deepcopy(next(c for c in CASES if c["id"] == "H2_adsorption_two_sites"))
     for s in case["reactants"][1:]:

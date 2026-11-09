@@ -3,9 +3,9 @@
 const $ = id => document.getElementById(id);
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const moleculeURL = (smiles, mapped = false) => `/api/molecule?smiles=${encodeURIComponent(smiles)}&mapped=${mapped}`;
-const ruleNames = {methane_h_abstraction:'Methane H/D atom abstraction',alkane_dehydrogenation:'Alkane dehydrogenation',olefin_double_bond_shift:'Olefin double-bond shift',terminal_olefin_coupling:'Terminal-olefin coupling',olefin_scission:'Olefin scission'};
+const ruleNames = {user_metal_H2_adsorption:'H₂ adsorption on metal',methane_h_abstraction:'Methane H/D atom abstraction',alkane_dehydrogenation:'Alkane dehydrogenation',olefin_double_bond_shift:'Olefin double-bond shift',terminal_olefin_coupling:'Terminal-olefin coupling',olefin_scission:'Olefin scission'};
 const reasons = {exhausted:'Network exhausted',max_depth:'Depth limit reached',targets_reached:'All targets found',max_species:'Species limit reached',max_reactions:'Reaction limit reached',user_stopped:'Stopped by user'};
-let builtinRules = [], availableRules = [], network = null, speciesById = new Map(), reactionsById = new Map();
+let builtinExample = null, builtinRules = [], availableRules = [], network = null, speciesById = new Map(), reactionsById = new Map();
 let selectedId = null, focusId = null, loadedRevision = -1, busy = false, polling = false;
 let analysis = null, pathwayReactionIds = null;
 const emptyInspector = $('details').innerHTML;
@@ -94,8 +94,8 @@ function addSpecies(containerId, record = {}) {
 function renderRules(rules, label = 'Built-in demo rules') {
   availableRules = rules;
   $('custom-rules').value = JSON.stringify(rules,null,2);
-  $('rule-set-name').textContent = label;
-  $('reset-rules').hidden = label === 'Built-in demo rules';
+  $('rule-set-name').textContent = rules.length ? label : 'No templates loaded';
+  $('reset-rules').hidden = !rules.length || label === 'Built-in demo rules';
   $('rules').innerHTML = rules.map((rule,index) => {
     const sides = rule.smarts.split('>>');
     const arities = sides.map(side => {
@@ -121,7 +121,7 @@ function fillSettings(request) {
   $('stop-on-targets').checked = config.stop_when_targets_found ?? true;
   $('single-event-enabled').checked = request.single_event != null;
   $('single-event-options').value = JSON.stringify(request.single_event || {calculator:'mapped_event_v1'},null,2);
-  renderRules(request.rules || builtinRules,request.rules ? 'Project rules' : 'Built-in demo rules');
+  renderRules(request.rules || [], 'Project rules');
 }
 
 function setBusy(value) {
@@ -134,7 +134,7 @@ function setBusy(value) {
   $('run').hidden = value;
   $('stop').hidden = !value;
   $('stop').disabled = false;
-  for (const id of ['new-project','open-project','run-example']) $(id).disabled = value;
+  for (const id of ['new-project','load-example','open-project','run-example']) $(id).disabled = value;
   $('graph-busy').hidden = !value;
   for (const id of ['save-project','export','export-format']) $(id).disabled = value || !network;
 }
@@ -280,7 +280,7 @@ function showReaction(reaction, channelIndex = 0, mapped = false) {
     const smiles = mapped && channel ? channel[side === 0 ? 'mapped_reactant_smiles' : 'mapped_product_smiles'][index] : s.smiles;
     return `<div class="reaction-molecule"><img src="${escapeHTML(moleculeURL(smiles,mapped))}" alt="${escapeHTML(smiles)}"><small>${escapeHTML(s.name || s.formula)} · ${escapeHTML(sid)}</small></div>`;
   }).join('');
-  $('details').innerHTML = `<div class="detail-content"><span class="detail-kicker">REACTION · ${escapeHTML(reaction.id)}</span><h3>${escapeHTML(ruleNames[reaction.rule_id] || reaction.rule_id)}</h3><span class="detail-tag">Depth ${reaction.depth ?? 'Unknown'}</span><span class="detail-tag">${reaction.kind === 'overall' ? 'Overall transformation' : escapeHTML(reaction.kind)}</span>${channels.length ? `<select id="channel" class="channel-select" aria-label="Mapping channel">${channels.map((c,i) => `<option value="${i}" ${i === channelIndex ? 'selected' : ''}>Channel ${i+1} · ${c.match_count} template matches</option>`).join('')}</select><label class="map-toggle"><input id="reaction-map" type="checkbox" ${mapped ? 'checked' : ''}>Show reaction atom-map numbers</label>` : '<p class="detail-note">This legacy record has no complete mapping channels.</p>'}<div class="reaction-side">${cards(sides[0],0)}</div><div class="reaction-arrow">↓</div><div class="reaction-side">${cards(sides[1],1)}</div><dl><dt>Rule ID / reaction family</dt><dd>${escapeHTML(reaction.rule_id)}<br>${escapeHTML(reaction.family)}</dd></dl>${mapped && channel ? `<details><summary>Mapped reaction SMILES</summary><code>${escapeHTML(channel.mapped_reaction_smiles)}</code></details>` : ''}${singleEventDetails(channel)}<p class="detail-note">Each channel stores one representative of symmetry-equivalent mappings. Template-match counts are not kinetic degeneracy factors and may be incomplete after an early stop.</p></div>`;
+  $('details').innerHTML = `<div class="detail-content"><span class="detail-kicker">REACTION · ${escapeHTML(reaction.id)}</span><h3>${escapeHTML(ruleNames[reaction.rule_id] || reaction.rule_id)}</h3><span class="detail-tag">Depth ${reaction.depth ?? 'Unknown'}</span><span class="detail-tag">Elementary input</span>${channels.length ? `<select id="channel" class="channel-select" aria-label="Mapping channel">${channels.map((c,i) => `<option value="${i}" ${i === channelIndex ? 'selected' : ''}>Channel ${i+1} · ${c.match_count} template matches</option>`).join('')}</select><label class="map-toggle"><input id="reaction-map" type="checkbox" ${mapped ? 'checked' : ''}>Show reaction atom-map numbers</label>` : '<p class="detail-note">This legacy record has no complete mapping channels.</p>'}<div class="reaction-side">${cards(sides[0],0)}</div><div class="reaction-arrow">↓</div><div class="reaction-side">${cards(sides[1],1)}</div><dl><dt>Rule ID / reaction family</dt><dd>${escapeHTML(reaction.rule_id)}<br>${escapeHTML(reaction.family)}</dd></dl>${mapped && channel ? `<details><summary>Mapped reaction SMILES</summary><code>${escapeHTML(channel.mapped_reaction_smiles)}</code></details>` : ''}${singleEventDetails(channel)}<p class="detail-note">Each channel stores one representative of symmetry-equivalent mappings. Template-match counts are not kinetic degeneracy factors and may be incomplete after an early stop.</p></div>`;
   if (channels.length) {
     $('channel').onchange = event => showReaction(reaction,Number(event.target.value),$('reaction-map').checked);
     $('reaction-map').onchange = event => showReaction(reaction,Number($('channel').value),event.target.checked);
@@ -487,10 +487,43 @@ $('rules-file').onchange = async event => {
   event.target.value = '';
 };
 $('reset-rules').onclick = () => renderRules(builtinRules);
+async function resetWorkspace(request) {
+  await api('/api/new',{method:'POST'});
+  network = analysis = pathwayReactionIds = selectedId = focusId = null;
+  speciesById.clear(); reactionsById.clear(); loadedRevision = -1;
+  cy.elements().remove();
+  $('details').innerHTML = emptyInspector;
+  $('pathway-panel').hidden = true;
+  $('single-event-summary').textContent = '';
+  $('network-count').textContent = 'Not generated';
+  $('visible-count').textContent = 'Drag to pan · Scroll to zoom · Click for details';
+  $('view-note').textContent = '';
+  $('depth-filter').disabled = false;
+  $('search').value = '';
+  $('depth-filter').innerHTML = '<option value="all">All depths</option>';
+  $('neighbors').disabled = true;
+  $('empty-state').hidden = false;
+  $('bulk-smiles').value = '';
+  fillSettings(request);
+  setBusy(false);
+  message();
+  await pollStatus();
+}
+$('load-example').onclick = async () => {
+  try {
+    await resetWorkspace(builtinExample);
+    $('input-hint').textContent = 'Propane + metal sites loaded · Five templates · Click Generate when ready.';
+    message('Gas and catalytic example loaded. Edit any inputs, then click Generate.',true);
+  } catch (error) { message(error.message); }
+};
 $('new-project').onclick = () => $('new-dialog').showModal();
 $('cancel-new').onclick = () => $('new-dialog').close();
 $('confirm-new').onclick = async () => {
-  try { await api('/api/new',{method:'POST'}); window.location.reload(); }
+  try {
+    await resetWorkspace({seeds:[],rules:[],config:{max_depth:4}});
+    $('input-hint').textContent = 'Start with your own species and templates, or click Load example.';
+    $('new-dialog').close();
+  }
   catch (error) { $('new-dialog').close(); message(error.message); }
 };
 
@@ -498,7 +531,8 @@ async function initialize() {
   try {
     const result = await api('/api/rules');
     builtinRules = result.rules;
-    fillSettings({seeds:[{smiles:'CCC',name:'Propane'}],config:{max_carbon:6,max_depth:4,max_species:200,max_reactions:1000}});
+    builtinExample = {seeds:result.seeds,rules:builtinRules,config:{max_carbon:6,max_depth:4,max_species:200,max_reactions:1000},single_event:{calculator:'mapped_event_v1'}};
+    fillSettings({seeds:[],rules:[],config:{max_depth:4}});
     await pollStatus();
     window.setInterval(pollStatus,700);
   } catch (error) { message(error.message); }

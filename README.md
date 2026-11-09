@@ -4,7 +4,7 @@
 
 A Python package for generating chemical reaction networks from RDKit reaction templates. Provide seed species, reaction rules, and a carbon-number limit to produce species tables, reaction tables, stoichiometry, and rule provenance. Rules are maintained separately from the enumeration algorithm so the chemistry can evolve as the mechanism is developed.
 
-Network generation is the core API; optional single-event annotations support kinetic parameter organization, including SEMK as one application. Four default bundled rules demonstrate overall structural transformations: alkane dehydrogenation, olefin double-bond migration, restricted terminal-olefin coupling, and olefin scission. **These examples do not cover a complete aromatization network and are not a validated elementary mechanism for Ga/H-ZSM-5.**
+Network generation is the core API; optional single-event annotations support kinetic parameter organization, including SEMK as one application. Five default bundled rules demonstrate mapped structural transformations: alkane dehydrogenation, olefin double-bond migration, restricted terminal-olefin coupling, olefin scission, and H₂ adsorption on explicit metal sites. **These examples do not cover a complete aromatization network and are not a validated elementary mechanism for Ga/H-ZSM-5.**
 
 ## Installation and testing
 
@@ -43,7 +43,7 @@ The center panel displays species structures and separate reaction nodes with st
 
 Use **Save project** to download a JSON file containing inputs, selected rules, settings, and the network. **Open** accepts either this project file or an existing `network.json`, including supported older schemas. **Export** provides network JSON, a ZIP of CSV tables plus DOT, or a PNG of the current graph view. Browser downloads use the browser's normal download location.
 
-The local server keeps one workspace in memory, shared by browser tabs. Refreshing restores that workspace; saving a project preserves it across server restarts. **New** clears the workspace after confirmation. The server listens only on the local loopback interface. Shut it down with Ctrl+C in its terminal.
+The local server keeps one workspace in memory, shared by browser tabs. Refreshing restores that workspace; saving a project preserves it across server restarts. **New** creates a blank workspace after confirmation: no seed species or reaction templates are loaded. **Load example** replaces the current workspace with the gas + catalytic example inputs without running them. **Generate** runs only the current inputs. The server listens only on the local loopback interface. Shut it down with Ctrl+C in its terminal.
 
 To keep dependencies in a separate environment, create it once from the project directory:
 
@@ -97,7 +97,7 @@ The C6 example generated 22 species, 45 reactions, and 45 symmetry-grouped chann
 
 ## Custom rules
 
-Rules are stored as a JSON list. This example represents the overall transformation of propane dehydrogenation, including H2:
+Rules are stored as a JSON list. This example represents a mapped propane dehydrogenation step, including H2. Supplied steps are treated as elementary inputs; the program does not establish elementary character:
 
 ```json
 [
@@ -105,7 +105,7 @@ Rules are stored as a JSON list. This example represents the overall transformat
     "id": "propane_dehydrogenation",
     "smarts": "[C;H3:1](-[H:4])-[C;H2:2](-[H:5])-[C;H3:3]>>[C:1]=[C:2]-[C:3].[H:4]-[H:5]",
     "family": "dehydrogenation",
-    "kind": "overall",
+    "kind": "elementary",
     "version": "1",
     "source": "Add the literature reference or rule rationale here",
     "notes": "Overall transformation; the catalytic cycle is not expanded"
@@ -120,7 +120,7 @@ You can also define rules directly in Python with `ReactionRule(...)`. The main 
 | `id` | Unique rule name. Different mechanisms can use different rule IDs even when their overall stoichiometry is identical. |
 | `smarts` | RDKit Reaction SMARTS; atom-map numbers specify the structural transformation. |
 | `family` | Reaction-family label. |
-| `kind` | Step classification, defaulting to `elementary`. User templates are treated as elementary; explicit `overall` demo rules remain overall. |
+| `kind` | Optional legacy metadata, defaulting to `elementary`. All supplied steps are treated as elementary inputs; this field does not gate factor calculation. |
 | `version`, `source`, `notes` | Rule version, supporting evidence, and assumptions. |
 | `exclude_smarts` | Skip the rule if any reactant matches any of these patterns. |
 | `reactant_phases`, `product_phases` | Species phases in template order; all default to `gas`. |
@@ -171,7 +171,7 @@ print(seed.symmetry_classes)  # (map_number, symmetry_class) pairs
 
 For a multi-reactant step, each occurrence is numbered separately. Labels that conflict with a previous occurrence are reassigned above all reserved labels. Each match's `atom_mapping` records the reactant slot, source atom index, species-level map, supplied map, and reaction-local map. Thus, two copies of a species can react without sharing atom IDs. Structural seed aliases are stored in `network.seed_inputs`; enumeration uses one representative per species identity.
 
-Templates run on explicit-H molecules. Rules that transfer hydrogen must move mapped H atoms and their bonds explicitly. Creating untraceable atoms, dropping source atoms, or producing duplicate product labels rejects that candidate with reason `atom_mapping`. Charge and site balance are checked separately. Existing implicit-H templates may need rewriting; this release does not silently infer their hydrogen correspondence. The bundled version-2 rules specify overall atom correspondence, not validated elementary hydrogen-transfer mechanisms.
+Templates run on explicit-H molecules. Rules that transfer hydrogen must move mapped H atoms and their bonds explicitly. Creating untraceable atoms, dropping source atoms, or producing duplicate product labels rejects that candidate with reason `atom_mapping`. Charge and site balance are checked separately. Existing implicit-H templates may need rewriting; this release does not silently infer their hydrogen correspondence. The bundled version-2 rules provide complete atom correspondence. As with user templates, elementary character is an input assumption, not a software validation result.
 
 `reaction.channels` stores one complete representative per symmetry-distinct mapped reaction. A record includes `mapped_reaction_smiles`, the mapped reactant/product SMILES lists, source numbering in `atom_mapping`, product-atom provenance, `symmetry_key`, and `match_count`. Reactant occurrence order is retained even when stoichiometry combines two identical species. A duplicate increments the existing channel's `match_count`; its full mapping is discarded. There is no separate `reaction.matches` list or list of duplicate-match indices.
 
@@ -313,7 +313,7 @@ The command exits with code 0 for exhaustion, depth completion, or target succes
 
 ## Optional single-event annotation
 
-SEMK is one use of ChemWeave. `Generator` continues to enumerate general rule-based networks without kinetic assumptions. Call `annotate_single_events(network, ...)` afterwards, add a `[single_event]` TOML section for CLI generation, or enable **Single-event annotation → Annotate after generation** in the English browser interface. Omitting the option leaves networks unannotated. The four default demo rules remain overall transformations and receive no elementary single-event factors.
+SEMK is one use of ChemWeave. `Generator` continues to enumerate general rule-based networks without kinetic assumptions. Call `annotate_single_events(network, ...)` afterwards, add a `[single_event]` TOML section for CLI generation, or enable **Single-event annotation → Annotate after generation** in the English browser interface. Omitting the option leaves networks unannotated. All supplied mapped steps, including the default demo rules, are eligible for path-factor calculation. Historical `kind="overall"` labels in saved projects do not block calculation. Reapply annotation to replace old skipped results; regeneration is not required.
 
 `single_event.py` is family-independent: it extracts reaction centers, dispatches an explicitly selected calculator, accepts imported factor assignments, and manages shared parameter records. No calculator is selected by default: `annotate_single_events(network)` extracts centers without assuming a reaction family or assigning a factor. Automatic constitutional-path counting lives in `path_degeneracy.py`, with optional example templates in `data/path_families.json` that are not used by the counting algorithm. The earlier methane-specific symmetry example remains separate in `single_event_calculators.py`.
 
@@ -350,6 +350,32 @@ There is no C/H, acyclic or family whitelist. Validation covers homolysis, abstr
 
 [The implementation and validation report](docs/path_degeneracy.md) records the counting proof, 11 document-linked or explicitly derived cases, manual enumeration, independent brute-force checks and fixed RMG source references. RMG itself was **not run** locally. This route does not use the 2023 hydrocracking free-state cancellation assumption or claim equality with all Vandewiele rotational factors: methyl/ethyl disproportionation yields path factor 3, versus 6 under that paper's symmetry convention.
 
+### Combined gas and catalytic default network
+
+Click **Load example** to load all five templates together, with propane and a vacant metal-site seed; optional factor annotation is enabled in this demo. A new workspace starts blank. Propane dehydrogenation produces H₂ at depth 1, which participates in H₂ + 2 M → 2 MH at depth 2. The adsorption template is selected alongside the gas templates and can be unchecked independently. Existing saved projects retain their own templates and seeds; choose **Load example** to load the combined example, then **Generate** to run it.
+
+`examples/combined_gas_catalytic.toml` runs the same combined setup:
+
+```bash
+PYTHONPATH=src python -m chemweave generate \
+  --config examples/combined_gas_catalytic.toml --output results/combined-gas-catalytic
+```
+
+The coupling between these demo steps is the generated H₂ species; this does not introduce a metal-mediated propane dehydrogenation mechanism.
+
+### Standalone catalytic example: H₂ dissociative adsorption
+
+Alongside the custom gas template, `examples/custom_catalytic_rules.json` supplies a user-defined catalytic template with no family registration or additional recipe. `examples/custom_catalytic_ne.toml` supplies hydrogen and an explicit vacant metal site species:
+
+```bash
+PYTHONPATH=src python -m chemweave generate \
+  --config examples/custom_catalytic_ne.toml --output results/custom-catalytic-ne
+```
+
+Source: Lozano-Blanco et al. (2011), p.427 Table 2 (1), H₂ + 2 M → 2 MH. The node `[*:1]` has `phase="surface"` and attributes `kind="metal", type="M", capacity=1`. One seed site species supplies two independent identical reactant occurrences. The template matches sites with `[#0]`, breaks H1–H2 and forms H1–M3 and H2–M4. The distinct labelled assignments are `(H1–M3, H2–M4)` and `(H1–M4, H2–M3)`; simultaneous swapping generates a duplicate assignment, not a third path. Thus `N=2`, `D=2!`, **n_e=1**. Sites and their properties persist into the adsorbates. No lattice-neighbor or orientation multiplicity is assumed.
+
+In the English web interface, **Single-event annotation → H₂ adsorption on metal → Generate** loads the same reaction as a built-in convenience. To use the standalone custom example, import its rules JSON and enter the seeds above, or **Open** the CLI-generated `results/custom-catalytic-ne/network.json`. The custom template has its own ID and omits a family label; it uses the same generic calculation. The reaction inspector and CSV record both the two labelled paths and the divisor 2.
+
 ### Earlier symmetry-ratio validation example
 
 The earlier symmetry validation family is forward gas-phase **H/D atom + methane(H/D) → dihydrogen + methyl radical**. Its elementary rule is distributed separately in `src/chemweave/data/single_event_rules.json`; **Load methane validation example** loads it in the browser without changing the default rules. Run the same example from the CLI:
@@ -371,7 +397,7 @@ The calculator `methane_h_abstraction_v1` adopts a tetrahedral methane reactant 
 
 These H/D results follow from the stated idealized geometry and isotope-preserving proper rotations: Td has 12 rotations, C3v has 3, C2v has 2, and Cs has 1. [NIST's symmetry-number explanation](https://cccbdb.nist.gov/thermox.asp) documents the convention; [NIST CCCBDB reaction 8](https://cccbdb.nist.gov/ts2x.asp?ri=8) identifies the H + CH4 elementary reaction. [Hu et al., J. Phys. Chem. A 2006](https://web.stanford.edu/group/Zarelab/publinks/764.pdf) describes its C3v saddle. The isotope variants validate this symmetry convention, not measured kinetic isotope effects. No fitted or ab initio rate constants are bundled.
 
-All calculators retain `single_event.reaction_center`: changed bonds (including order/stereo), changed atom charge/radical/stereo states, and the participating **reaction-local atom maps**. The methane symmetry calculator recognizes the complete bond/radical transformation and gas/no-site state, rather than trusting a rule name. Use consistent protium labels: methane mixing unlabeled H with explicit 1H is unsupported because those labels split RDKit channels. Its kinetic subclass includes carbon isotope, transferred isotope, abstractor isotope, and spectator isotope composition. Distinct isotope environments therefore do not automatically share fitted parameters. Unsupported elementary families and overall transformations retain a center and an explicit `unsupported` status with no factor. Reactions without mapping channels are listed in `network.single_event["unmapped_reactions"]`.
+All calculators retain `single_event.reaction_center`: changed bonds (including order/stereo), changed atom charge/radical/stereo states, and the participating **reaction-local atom maps**. The methane symmetry calculator recognizes the complete bond/radical transformation and gas/no-site state, rather than trusting a rule name. Use consistent protium labels: methane mixing unlabeled H with explicit 1H is unsupported because those labels split RDKit channels. Its kinetic subclass includes carbon isotope, transferred isotope, abstractor isotope, and spectator isotope composition. Distinct isotope environments therefore do not automatically share fitted parameters. Inputs outside this older methane calculator’s scope retain a center and an explicit `unsupported` status with no factor. Historical step-classification labels do not restrict the generic path calculator. Reactions without mapping channels are listed in `network.single_event["unmapped_reactions"]`.
 
 **`match_count` and channel count are never single-event factors.** Validation tests deliberately change the template to produce 4 versus 12 matches while the independently calculated factor remains 4. Early-stop counters likewise do not change the symmetry ratio. This older symmetry calculator covers only the forward methane family. The separate path calculator has the scope and normalization described above; it does not extend the symmetry-ratio method.
 

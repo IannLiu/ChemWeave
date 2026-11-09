@@ -163,5 +163,5 @@ def test_roundtrip_and_exports_preserve_full_network(tmp_path):
         assert any(row["coefficient"] == "2" for row in rows)
     dot = (tmp_path / "network.dot").read_text()
     assert "shape=box" in dot
-    assert len(net.rules) == 4
+    assert len(net.rules) == 5
 

@@ -78,18 +78,17 @@ def annotate_single_events(network, *, calculator=None, factors=(), parameters=N
             center = reaction_center(channel["mapped_reaction_smiles"])
             annotation = {"status": "unsupported", "reaction_center": center,
                           "family": reaction.family, "method": "not_calculated",
-                          "reason": "No calculator for this elementary family and state"}
-            elementary = reaction.kind == "elementary"
+                          "reason": "No applicable calculator selected for this mapped reaction"}
+            # Elementary character is an input assumption, not an eligibility
+            # test. Legacy 'kind' metadata must not block saved networks either.
             imported = imports.pop((reaction.id, index), None)
             record = imported
-            if record is None and elementary and calculate is not None:
+            if record is None and calculate is not None:
                 record = calculate(network=network, reaction=reaction, channel=channel, center=center)
             if imported is None and record is not None and record.get("status", "calculated") != "calculated":
                 annotation.update(record)
                 record = None
             if record is not None:
-                if not elementary:
-                    raise ValueError(f"{reaction.id}: single-event factors require kind='elementary'")
                 required = ("convention", "source")
                 if any(not record.get(k) for k in required):
                     raise ValueError(f"{reaction.id}: factor assignments need {', '.join(required)}")
@@ -133,8 +132,6 @@ def annotate_single_events(network, *, calculator=None, factors=(), parameters=N
                                                "A_units": units, "Ea_units": "J/mol", "T_ref_units": "K",
                                                "molecularity": order, "status": "unfitted", "source": ""})
                 registry[class_id]["rate_basis"] = basis
-            elif not elementary:
-                annotation["reason"] = "Overall transformation; elementary kinetics not assigned"
             annotations.append((channel, annotation))
     if imports:
         raise ValueError(f"Imported factors select unknown reaction/channel: {list(imports)}")

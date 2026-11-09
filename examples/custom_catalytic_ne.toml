@@ -1,0 +1,20 @@
+# H2 dissociative adsorption on two identical abstract metal sites.
+# The one vacant-site species supplies both reactant occurrences.
+rules = "custom_catalytic_rules.json"
+
+[[seeds]]
+smiles = "[H][H]"
+name = "Hydrogen"
+
+[[seeds]]
+smiles = "[*:1]"
+name = "Vacant metal site"
+phase = "surface"
+site_atoms = {"1" = {kind = "metal", type = "M", capacity = 1}}
+
+[generation]
+max_carbon = 1
+max_depth = 1
+
+[single_event]
+calculator = "mapped_event_v1"

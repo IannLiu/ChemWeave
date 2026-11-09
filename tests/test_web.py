@@ -33,11 +33,19 @@ def finish(client):
 
 
 def test_assets_and_molecule_previews(client):
-    assert client.get('/').status_code == 200
-    assert 'ChemWeave' in client.get('/').text
+    from hashlib import sha256
+    page = client.get('/')
+    assert page.status_code == 200
+    assert 'ChemWeave' in page.text
+    assert page.headers['cache-control'] == 'no-store'
     for path in ['app.js', 'style.css', 'vendor/cytoscape.min.js']:
-        assert client.get('/static/' + path).status_code == 200
-    assert len(client.get('/api/rules').json()['rules']) == 4
+        asset = client.get('/static/' + path)
+        assert asset.status_code == 200
+        if not path.startswith('vendor/'):
+            url = f'/static/{path}?v={sha256(asset.content).hexdigest()[:16]}'
+            assert url in page.text
+            assert client.get(url).content == asset.content
+    assert len(client.get('/api/rules').json()['rules']) == 5
     preview = client.post('/api/preview', json={'smiles': '[CH3:15][CH2:8][CH3:7]'})
     assert preview.status_code == 200
     assert preview.json()['smiles'] == 'CCC'
@@ -94,7 +102,7 @@ def test_generation_downloads_and_project_restore(client):
     assert network.reactions[0].channels[0]['match_count'] == 24
     project = client.get('/api/export/project').json()
     assert project['request']['seeds'][0]['smiles'] == 'CCC'
-    assert len(project['request']['rules']) == 4
+    assert len(project['request']['rules']) == 5
     with ZipFile(BytesIO(client.get('/api/export/csv').content)) as archive:
         assert set(archive.namelist()) == {'species.csv', 'reactions.csv', 'channels.csv', 'stoichiometry.csv', 'network.dot'}
         assert 'depth' in archive.read('species.csv').decode('utf-8-sig')
@@ -281,3 +289,82 @@ def test_user_templates_compute_without_family_or_recipe(client, case_id):
     assert second == se
     assert client.post('/api/rules/validate', json=[]).status_code == 422
     assert client.post('/api/rules/validate', json=[{'id': 'bad', 'smarts': 'bad'}]).status_code == 422
+
+
+def test_default_templates_and_legacy_overall_project_calculate_factors(client):
+    rules = client.get('/api/rules').json()['rules']
+    assert all(rule['kind'] == 'elementary' for rule in rules)
+    request = {'seeds': client.get('/api/rules').json()['seeds'], 'rules': rules,
+               'config': {'max_carbon': 6, 'max_depth': 4},
+               'single_event': {'calculator': 'mapped_event_v1'}}
+    assert client.post('/api/run', json=request).status_code == 202
+    assert finish(client)['status'] == 'finished'
+    project = client.get('/api/export/project').json()
+    expected = {}
+    assert {r['rule_id'] for r in project['network']['reactions']} == {r['id'] for r in rules}
+    adsorption = next(r for r in project['network']['reactions'] if r['rule_id'] == 'user_metal_H2_adsorption')
+    assert adsorption['depth'] == 2
+    assert adsorption['channels'][0]['single_event']['n_e'] == 1
+    hydrogen = next(s for s in project['network']['species'] if s['smiles'] == '[H][H]')
+    assert hydrogen['id'] not in project['network']['seeds']
+    assert [hydrogen['id'], 1] in adsorption['reactants']
+    assert any([hydrogen['id'], 1] in r['products'] for r in project['network']['reactions']
+               if r['rule_id'] == 'alkane_dehydrogenation')
+    for reaction in project['network']['reactions']:
+        expected[reaction['id']] = [c['single_event']['factor'] for c in reaction['channels']]
+        assert all(c['single_event']['status'] == 'calculated' for c in reaction['channels'])
+        # Reproduce the old project shown in the user's screenshot.
+        reaction['kind'] = 'overall'
+        for channel in reaction['channels']:
+            channel['single_event'] = {'status': 'unsupported', 'method': 'not_calculated',
+                                      'reason': 'Overall transformation; elementary kinetics not assigned'}
+    for rule in project['network']['rules'] + project['request']['rules']:
+        rule['kind'] = 'overall'
+    assert client.post('/api/open', json=project).status_code == 200
+    updated = client.post('/api/single-event', json={'calculator': 'mapped_event_v1'})
+    assert updated.status_code == 200
+    for reaction in updated.json()['network']['reactions']:
+        assert [c['single_event']['factor'] for c in reaction['channels']] == expected[reaction['id']]
+        assert all(c['single_event']['status'] == 'calculated' and 'reason' not in c['single_event']
+                   for c in reaction['channels'])
+    saved = client.get('/api/export/project').json()
+    assert client.post('/api/open', json=saved).json()['network'] == updated.json()['network']
+    # Regenerating historical templates also ignores their classification label.
+    assert client.post('/api/run', json=saved['request']).status_code == 202
+    assert finish(client)['status'] == 'finished'
+    for reaction in client.get('/api/network').json()['network']['reactions']:
+        assert [c['single_event']['factor'] for c in reaction['channels']] == expected[reaction['id']]
+
+
+def test_standalone_custom_catalytic_example(client):
+    from pathlib import Path
+    import tomllib
+    folder = Path(__file__).parents[1] / 'examples'
+    config = tomllib.loads((folder / 'custom_catalytic_ne.toml').read_text())
+    rules = json.loads((folder / config['rules']).read_text())
+    assert all('family' not in rule and 'kind' not in rule for rule in rules)
+    assert client.post('/api/rules/validate', json=rules).status_code == 200
+    request = {'seeds': config['seeds'], 'rules': rules, 'config': config['generation'],
+               'single_event': config['single_event']}
+    assert client.post('/api/run', json=request).status_code == 202
+    assert finish(client)['status'] == 'finished'
+    payload = client.get('/api/network').json()
+    network = payload['network']
+    assert len(network['reactions']) == 1
+    reaction = network['reactions'][0]
+    assert reaction['rule_id'] == 'user_metal_H2_adsorption'
+    assert sorted(n for _, n in reaction['reactants']) == [1, 2]
+    se = reaction['channels'][0]['single_event']
+    assert se['status'] == 'calculated' and se['n_e'] == 1
+    assert se['counting']['unique_labeled_paths'] == 2
+    assert se['counting']['identical_reactant_divisor'] == 2
+    assert se['counting']['correction_applications'] == 1
+    assert len(se['event']['site_atoms']) == 2
+    assert all(site['type'] == 'M' for site in se['event']['site_atoms'].values())
+    assert network['single_event']['parameters'] == {}
+    project = client.get('/api/export/project').json()
+    assert client.post('/api/open', json=project).json() == payload
+    with ZipFile(BytesIO(client.get('/api/export/csv').content)) as archive:
+        assert 'user_metal_H2_adsorption' in archive.read('reactions.csv').decode('utf-8-sig')
+        assert 'mapped_event_orbit_v1' in archive.read('single_event.csv').decode('utf-8-sig')
+    assert 'H₂ adsorption on metal' in client.get('/').text

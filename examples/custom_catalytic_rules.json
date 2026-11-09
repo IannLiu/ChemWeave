@@ -1,0 +1,11 @@
+[
+  {
+    "id": "user_metal_H2_adsorption",
+    "smarts": "[#1:1]-[#1:2].[#0;D0:3].[#0;D0:4]>>[#0:3]-[#1:1].[#0:4]-[#1:2]",
+    "reactant_phases": ["gas", "surface", "surface"],
+    "product_phases": ["surface", "surface"],
+    "site_constraints": {"3": {"kind": "metal"}, "4": {"kind": "metal"}},
+    "source": "Lozano-Blanco et al. 2011, p.427 Table 2 (1), DOI 10.2516/ogst/2009075",
+    "notes": "H2 + 2 M -> 2 MH. Two independent identical abstract metal sites; no lattice adjacency or adsorption orientation. No family registration or separate factor recipe."
+  }
+]

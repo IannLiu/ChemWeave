@@ -167,7 +167,7 @@ def test_imported_symmetry_ratio_and_transactional_errors():
     assert network.to_dict() == before
 
 
-def test_opt_in_overall_unsupported_other_elementary_and_old_schema():
+def test_opt_in_calculator_scope_legacy_kind_and_old_schema():
     network = Generator(load_rules(), GenerationConfig(max_depth=1)).generate([Species.from_smiles("CCC")])
     assert network.single_event is None
     assert all("single_event" not in c for r in network.reactions for c in r.channels)
@@ -175,13 +175,16 @@ def test_opt_in_overall_unsupported_other_elementary_and_old_schema():
     se = network.reactions[0].channels[0]["single_event"]
     assert se["status"] == "unsupported" and "factor" not in se
     assert se["reaction_center"]["bond_changes"]
-    with pytest.raises(ValueError, match="elementary"):
+    with pytest.raises(ValueError, match="convention, source"):
         annotate_single_events(network, factors=[{"reaction_id": network.reactions[0].id, "channel": 1}])
-    # Even a methane-like mapping must satisfy the calculator's phase convention.
+    # Historical classification cannot override an applicable mapped event.
     other = methane_network()
     other.reactions[0].kind = "overall"
     annotate_single_events(other, calculator=CALCULATOR)
-    assert other.reactions[0].channels[0]["single_event"]["status"] == "unsupported"
+    assert other.reactions[0].channels[0]["single_event"]["factor"] == 4
+    annotate_single_events(other, factors=[{"reaction_id": other.reactions[0].id, "channel": 1,
+                                          "factor": 4, "convention": "Four equivalent H", "source": "Hand count"}])
+    assert other.reactions[0].channels[0]["single_event"]["status"] == "imported"
     data = methane_network().to_dict()
     data["schema_version"] = 4
     data.pop("single_event")
